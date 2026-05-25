@@ -90,7 +90,22 @@ function App() {
 
 function Stat({label, value, sub, icon}) { return <div className="card stat"><span>{label}</span><strong>{value}</strong><small>{icon} {sub}</small></div> }
 
+function SessionTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const value = Number(payload[0].value || 0);
+  return <div className="chartTooltip">
+    <b>{label}</b>
+    <span className={value >= 0 ? 'green' : 'red'}>{money(value)}</span>
+    <small>{value >= 0 ? 'Profitable session' : 'Needs review'}</small>
+  </div>
+}
+
 function Dashboard({ stats, equity, grouped }) {
+  const sessionData = grouped('session').map((item, index) => ({
+    ...item,
+    fill: item.pnl >= 0 ? `url(#sessionWin${index})` : `url(#sessionLoss${index})`,
+  }));
+
   return <>
     <section className="statsScroller"><div className="grid stats">
       <Stat label="Total PnL" value={money(stats.total)} sub="portfolio performance" icon="↗" />
@@ -101,7 +116,35 @@ function Dashboard({ stats, equity, grouped }) {
     </div></section>
     <section className="grid dash">
       <div className="card big"><h3>Equity Curve</h3><ResponsiveContainer height={280}><AreaChart data={equity}><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2f7bff" stopOpacity={0.7}/><stop offset="95%" stopColor="#2f7bff" stopOpacity={0}/></linearGradient></defs><XAxis dataKey="date"/><YAxis/><Tooltip/><Area type="monotone" dataKey="equity" stroke="#38bdf8" fill="url(#g)" strokeWidth={3}/></AreaChart></ResponsiveContainer></div>
-      <div className="card"><h3>Performance by Session</h3><ResponsiveContainer height={280}><BarChart data={grouped('session')}><XAxis dataKey="name"/><YAxis/><Tooltip/><Bar dataKey="pnl" radius={[10,10,0,0]}/></BarChart></ResponsiveContainer></div>
+      <div className="card sessionCard">
+        <div className="chartHeader">
+          <div>
+            <h3>Performance by Session</h3>
+            <p>Which market window prints best for you.</p>
+          </div>
+          <span className="livePill">Live edge</span>
+        </div>
+        <ResponsiveContainer height={300}>
+          <BarChart data={sessionData} margin={{ top: 18, right: 8, left: -12, bottom: 0 }}>
+            <defs>
+              {sessionData.map((item, index) => <linearGradient key={`g-${item.name}`} id={item.pnl >= 0 ? `sessionWin${index}` : `sessionLoss${index}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={item.pnl >= 0 ? '#34f5c5' : '#ff4d7d'} stopOpacity={1}/>
+                <stop offset="58%" stopColor={item.pnl >= 0 ? '#2f7bff' : '#8b1dff'} stopOpacity={0.92}/>
+                <stop offset="100%" stopColor={item.pnl >= 0 ? '#15295f' : '#3a1025'} stopOpacity={0.82}/>
+              </linearGradient>)}
+            </defs>
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 13, fontWeight: 700 }} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} width={44} />
+            <Tooltip cursor={{ fill: 'rgba(56,189,248,.08)' }} content={<SessionTooltip />} />
+            <Bar dataKey="pnl" radius={[16,16,16,16]} barSize={48}>
+              {sessionData.map((entry, index) => <Cell key={`cell-${entry.name}`} fill={entry.fill} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+        <div className="sessionLegend">
+          {sessionData.map(item => <span key={item.name}><i className={item.pnl >= 0 ? 'winDot' : 'lossDot'} />{item.name}: <b className={item.pnl >= 0 ? 'green' : 'red'}>{money(item.pnl)}</b></span>)}
+        </div>
+      </div>
       <div className="card score"><Flame/><h3>Win/Loss Streak</h3><strong>{stats.wins} Wins</strong><p>Best streak grows when rules are respected.</p></div>
       <div className="card score"><ShieldCheck/><h3>Discipline Score</h3><strong>{stats.discipline}/100</strong><p>{stats.discipline > 80 ? 'Elite consistency.' : 'Focus on patience and A+ setups.'}</p></div>
     </section>
