@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, Smartphone, Monitor, BadgeCheck, WalletCards, Percent, Moon } from 'lucide-react';
+import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import './styles.css';
 
@@ -87,7 +87,7 @@ function App() {
       {active === 'Calendar' && <CalendarPage trades={trades} stats={stats}/>} 
       {active === 'AI Coach' && <Coach trades={trades} stats={stats}/>} 
       {active === 'Goals' && <Goals stats={stats}/>} 
-      {active === 'Settings' && <SettingsPage/>} 
+      {active === 'Settings' && <SettingsPage trades={trades} setTrades={setTrades}/>} 
     </main>
     <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>
     <nav className="bottomNav" aria-label="Mobile navigation">{nav.slice(0,5).map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={19}/><span>{name === 'Dashboard' ? 'Home' : name.replace('AI Coach','Coach')}</span></button>)}</nav>
@@ -457,7 +457,7 @@ function Coach({ trades, stats }) {
   return <section className="grid coach"><div className="card ai"><Sparkles/><h2>AI Trading Coach</h2><p>Your edge: {stats.winRate > 60 ? 'good execution and positive expectancy.' : 'needs more selectivity.'}</p></div><div className="card"><h3>Today’s Insight</h3><p>{bad.length ? `You had ${bad.length} emotionally risky trades. Reduce FOMO/greed entries and trade only confirmed setups.` : 'Great emotional control. Keep following your checklist.'}</p></div><div className="card"><h3>Things to Improve</h3><ul><li>Avoid trading after 2 losses.</li><li>Do not move SL too early.</li><li>Focus on London/NY high quality setups.</li></ul></div></section>
 }
 function Goals({ stats }) { return <div className="card goals"><h3>Prop Firm Ready</h3><div className="progress"><span style={{width:`${Math.min(stats.discipline,100)}%`}}/></div><p>Discipline: {stats.discipline}/100 · Target: minimum 80.</p></div> }
-function SettingsPage() {
+function SettingsPage({ trades, setTrades }) {
   const defaults = { accountSize: 10000, currency: 'USD', riskPerTrade: 1, maxDailyLoss: 3, maxTradesDay: 3, mainPair: 'XAUUSD', mainSession: 'London', journalMode: 'Strict', theme: 'Dark' };
   const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('skrtzSettings') || 'null') || defaults);
 
@@ -468,6 +468,48 @@ function SettingsPage() {
 
   const update = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
   const reset = () => setSettings(defaults);
+  const riskValue = ((Number(settings.accountSize || 0) * Number(settings.riskPerTrade || 0)) / 100).toFixed(2);
+  const dailyStop = ((Number(settings.accountSize || 0) * Number(settings.maxDailyLoss || 0)) / 100).toFixed(2);
+
+  const exportJournal = () => {
+    const backup = { app: 'SKRTZ Trading Journal', exportedAt: new Date().toISOString(), settings, trades };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `skrtz-journal-backup-${format(new Date(), 'yyyy-MM-dd')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const importJournal = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || '{}'));
+        const importedTrades = Array.isArray(parsed) ? parsed : parsed.trades;
+        if (!Array.isArray(importedTrades)) throw new Error('Invalid backup');
+        setTrades(importedTrades);
+        if (parsed.settings) setSettings(prev => ({ ...prev, ...parsed.settings }));
+      } catch {
+        alert('Backup file is not valid.');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const clearJournal = () => {
+    if (confirm('Delete all trades from this device?')) setTrades([]);
+  };
+
+  const restoreDemo = () => {
+    if (confirm('Restore the starter demo trades?')) setTrades(starterTrades);
+  };
 
   return <section className="grid settingsGrid">
     <div className="card form"><h3>Account & Risk Settings</h3>
@@ -487,13 +529,25 @@ function SettingsPage() {
         <label>Theme<select value={settings.theme} onChange={e=>update('theme', e.target.value)}><option>Dark</option><option>Midnight</option><option>Clean</option></select></label>
       </div>
       <div className="settingsPreview">
-        <p><WalletCards size={16}/> Risk value: <b>{settings.currency} {((Number(settings.accountSize || 0) * Number(settings.riskPerTrade || 0)) / 100).toFixed(2)}</b> per trade.</p>
-        <p><Percent size={16}/> Daily stop: <b>{settings.currency} {((Number(settings.accountSize || 0) * Number(settings.maxDailyLoss || 0)) / 100).toFixed(2)}</b>.</p>
+        <p><WalletCards size={16}/> Risk value: <b>{settings.currency} {riskValue}</b> per trade.</p>
+        <p><Percent size={16}/> Daily stop: <b>{settings.currency} {dailyStop}</b>.</p>
         <p><Moon size={16}/> Saved locally on this device.</p>
       </div>
       <button className="primary full" type="button" onClick={reset}>Reset Settings</button>
     </div>
-    <div className="card"><h3>Responsive App</h3><p><Smartphone size={16}/> iPhone-first layout with bottom navigation, safe-area support and thumb-friendly buttons.</p><p><Monitor size={16}/> Desktop layout keeps the sidebar and wide analytics dashboards.</p></div>
+    <div className="card dataTools">
+      <div className="toolsHead"><DatabaseZap size={20}/><div><h3>Journal Data</h3><p>Backup, import or reset your trades.</p></div></div>
+      <div className="toolsStats">
+        <span><b>{trades.length}</b><small>Trades saved</small></span>
+        <span><b>{settings.currency} {riskValue}</b><small>Risk / trade</small></span>
+      </div>
+      <div className="settingsActions">
+        <button type="button" className="toolBtn" onClick={exportJournal}><Download size={18}/> Export Backup</button>
+        <label className="toolBtn fileBtn"><Upload size={18}/> Import Backup<input type="file" accept="application/json,.json" onChange={importJournal}/></label>
+        <button type="button" className="toolBtn" onClick={restoreDemo}><RotateCcw size={18}/> Restore Demo</button>
+        <button type="button" className="toolBtn danger" onClick={clearJournal}><Trash2 size={18}/> Clear Trades</button>
+      </div>
+    </div>
   </section>
 }
 
