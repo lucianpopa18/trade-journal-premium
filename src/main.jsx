@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Menu, X, Smartphone, Monitor, BadgeCheck, WalletCards, Percent, Moon } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
+import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, Smartphone, Monitor, BadgeCheck, WalletCards, Percent, Moon } from 'lucide-react';
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import './styles.css';
 
 const starterTrades = [
@@ -90,6 +90,38 @@ function App() {
 
 function Stat({label, value, sub, icon}) { return <div className="card stat"><span>{label}</span><strong>{value}</strong><small>{icon} {sub}</small></div> }
 
+function getAnalyticsRange(filter, customRange) {
+  const today = new Date();
+  const end = endOfDay(today);
+  if (filter === 'Today') return { start: startOfDay(today), end, label: 'Today' };
+  if (filter === 'Last Week') return { start: startOfDay(subDays(today, 6)), end, label: 'Last 7 days' };
+  if (filter === 'Last Month') return { start: startOfDay(subMonths(today, 1)), end, label: 'Last 30 days' };
+  if (filter === 'Custom') {
+    const start = customRange.start ? startOfDay(parseISO(customRange.start)) : null;
+    const customEnd = customRange.end ? endOfDay(parseISO(customRange.end)) : null;
+    return { start, end: customEnd, label: start && customEnd ? `${format(start, 'MMM d')} - ${format(customEnd, 'MMM d')}` : 'Custom range' };
+  }
+  return { start: null, end: null, label: 'All time' };
+}
+
+function AnalyticsFilter({ filter, setFilter, customRange, setCustomRange, count, total, rangeLabel }) {
+  const filters = ['Today', 'Last Week', 'Last Month', 'All time', 'Custom'];
+  return <div className="analyticsFilter card">
+    <div>
+      <h3>Analytics Range</h3>
+      <p>{rangeLabel} · {count} trades · <b className={total >= 0 ? 'green' : 'red'}>{money(total)}</b></p>
+    </div>
+    <div className="filterPills" role="tablist" aria-label="Analytics date range">
+      {filters.map(item => <button key={item} type="button" className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}
+    </div>
+    {filter === 'Custom' && <div className="customRange">
+      <label>From<input type="date" value={customRange.start} onChange={e => setCustomRange(prev => ({ ...prev, start: e.target.value }))}/></label>
+      <label>To<input type="date" value={customRange.end} onChange={e => setCustomRange(prev => ({ ...prev, end: e.target.value }))}/></label>
+    </div>}
+  </div>
+}
+
+
 function SessionTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const value = Number(payload[0].value || 0);
@@ -151,8 +183,87 @@ function Dashboard({ stats, equity, grouped }) {
   </>
 }
 
-function Trades({ trades, form, setForm, addTrade, setTrades }) {
+function calculateTradeValues(data) {
+  const rr = data.entry && data.sl && data.tp ? Math.abs((Number(data.tp)-Number(data.entry))/(Number(data.entry)-Number(data.sl))) : Number(data.rr || 0);
+  const signed = data.direction === 'Long' ? 1 : -1;
+  const raw = data.entry && data.tp ? (Number(data.tp)-Number(data.entry)) * signed : 0;
+  const pnl = data.pnl !== undefined && data.pnl !== '' ? Number(data.pnl) : Math.round(raw * 100 * Number(data.lot || 1));
+  return { rr: Number((rr || 0).toFixed(2)), pnl };
+}
+
+function DetailItem({ label, value, tone }) {
+  return <div className="detailItem"><span>{label}</span><b className={tone || ''}>{value || '-'}</b></div>
+}
+
+function TradeDetailsModal({ trade, onClose, onEdit }) {
+  if (!trade) return null;
+  const resultTone = Number(trade.pnl) >= 0 ? 'green' : 'red';
+  return <div className="modalBackdrop" onClick={onClose}>
+    <div className="tradeModal" onClick={e => e.stopPropagation()}>
+      <div className="modalTop">
+        <button className="ghostBtn" type="button" onClick={onClose}><ArrowLeft size={18}/> Back</button>
+        <button className="primary smallBtn" type="button" onClick={() => onEdit(trade)}><Pencil size={16}/> Edit</button>
+      </div>
+      <div className="tradeHero">
+        <div>
+          <span className="tradeBadge">{trade.direction}</span>
+          <h2>{trade.symbol}</h2>
+          <p>{trade.date} · {trade.session} · {trade.setup}</p>
+        </div>
+        <strong className={resultTone}>{money(Number(trade.pnl || 0))}</strong>
+      </div>
+      <div className="detailGrid">
+        <DetailItem label="Entry" value={trade.entry} />
+        <DetailItem label="Stop Loss" value={trade.sl} tone="red" />
+        <DetailItem label="Take Profit" value={trade.tp} tone="green" />
+        <DetailItem label="Risk" value={`${trade.risk || 0}%`} />
+        <DetailItem label="Lot Size" value={trade.lot} />
+        <DetailItem label="RR" value={`${Number(trade.rr || 0).toFixed(2)}R`} />
+        <DetailItem label="Emotion" value={trade.emotion} />
+        <DetailItem label="Confidence" value={`${trade.confidence || 0}/10`} />
+      </div>
+      <div className="tradeNotes">
+        <span>Notes</span>
+        <p>{trade.notes || 'No notes added for this trade.'}</p>
+      </div>
+    </div>
+  </div>
+}
+
+function EditTradeModal({ trade, setTrade, onSave, onClose }) {
+  if (!trade) return null;
   const fields = [['symbol','Symbol'], ['entry','Entry'], ['sl','SL'], ['tp','TP'], ['risk','Risk %'], ['lot','Lot Size'], ['pnl','PnL override']];
+  return <div className="modalBackdrop" onClick={onClose}>
+    <form className="tradeModal editModal" onClick={e => e.stopPropagation()} onSubmit={onSave}>
+      <div className="modalTop"><button className="ghostBtn" type="button" onClick={onClose}><ArrowLeft size={18}/> Cancel</button><button className="primary smallBtn" type="submit"><Save size={16}/> Save</button></div>
+      <h2>Edit Trade</h2>
+      <div className="formgrid">
+        <label>Date<input type="date" value={trade.date} onChange={e=>setTrade({...trade,date:e.target.value})}/></label>
+        <label>Direction<select value={trade.direction} onChange={e=>setTrade({...trade,direction:e.target.value})}><option>Long</option><option>Short</option></select></label>
+        <label>Session<select value={trade.session} onChange={e=>setTrade({...trade,session:e.target.value})}><option>London</option><option>NY</option><option>Asia</option></select></label>
+        <label>Emotion<select value={trade.emotion} onChange={e=>setTrade({...trade,emotion:e.target.value})}><option>Calm</option><option>Confident</option><option>FOMO</option><option>Greedy</option><option>Fear</option></select></label>
+        <label>Setup<select value={trade.setup} onChange={e=>setTrade({...trade,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
+        {fields.map(([k,l])=><label key={k}>{l}<input value={trade[k] ?? ''} onChange={e=>setTrade({...trade,[k]:e.target.value})}/></label>)}
+        <label>Confidence<input type="range" min="1" max="10" value={trade.confidence || 5} onChange={e=>setTrade({...trade,confidence:e.target.value})}/></label>
+        <label className="wide">Notes<textarea value={trade.notes || ''} onChange={e=>setTrade({...trade,notes:e.target.value})}/></label>
+      </div>
+    </form>
+  </div>
+}
+
+function Trades({ trades, form, setForm, addTrade, setTrades }) {
+  const [detailTrade, setDetailTrade] = useState(null);
+  const [editTrade, setEditTrade] = useState(null);
+  const fields = [['symbol','Symbol'], ['entry','Entry'], ['sl','SL'], ['tp','TP'], ['risk','Risk %'], ['lot','Lot Size'], ['pnl','PnL override']];
+  const startEdit = (trade) => { setDetailTrade(null); setEditTrade({ ...trade }); };
+  const saveEdit = (e) => {
+    e.preventDefault();
+    const values = calculateTradeValues(editTrade);
+    const updated = { ...editTrade, ...values };
+    setTrades(trades.map(t => t.id === updated.id ? updated : t));
+    setEditTrade(null);
+  };
+
   return <section className="grid tradesPage">
     <form className="card form" onSubmit={addTrade}><h3>New Trade</h3>
       <div className="formgrid"><label>Date<input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></label>
@@ -165,7 +276,17 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
     </form>
-    <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div><span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span><button onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))}><Trash2 size={16}/></button></div>)}</div>
+    <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className="tradeRow enhancedTradeRow" key={t.id}>
+      <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
+      <span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span>
+      <div className="tradeActions">
+        <button className="iconAction viewAction" type="button" onClick={()=>setDetailTrade(t)} title="View details"><Eye size={16}/><em>View</em></button>
+        <button className="iconAction editAction" type="button" onClick={()=>startEdit(t)} title="Edit trade"><Pencil size={16}/><em>Edit</em></button>
+        <button className="iconAction deleteAction" type="button" onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))} title="Delete trade"><Trash2 size={16}/></button>
+      </div>
+    </div>)}</div>
+    <TradeDetailsModal trade={detailTrade} onClose={() => setDetailTrade(null)} onEdit={startEdit} />
+    <EditTradeModal trade={editTrade} setTrade={setEditTrade} onSave={saveEdit} onClose={() => setEditTrade(null)} />
   </section>
 }
 
@@ -179,19 +300,39 @@ function EmotionTooltip({ active, payload }) {
   </div>
 }
 
-function Analytics({ grouped }) {
-  const setupData = grouped('setup').map((item, index) => ({
+function Analytics({ trades }) {
+  const [filter, setFilter] = useState('All time');
+  const [customRange, setCustomRange] = useState({ start: '', end: '' });
+  const range = getAnalyticsRange(filter, customRange);
+  const filteredTrades = useMemo(() => {
+    if (!range.start && !range.end) return trades;
+    if (!range.start || !range.end) return [];
+    return trades.filter(trade => {
+      try {
+        return isWithinInterval(parseISO(trade.date), { start: range.start, end: range.end });
+      } catch {
+        return false;
+      }
+    });
+  }, [trades, range.start?.getTime(), range.end?.getTime()]);
+
+  const filteredTotal = filteredTrades.reduce((sum, trade) => sum + Number(trade.pnl || 0), 0);
+  const filteredGrouped = (key) => Object.values(filteredTrades.reduce((a,t)=>{ const k=t[key] || 'Other'; a[k] ||= { name:k, pnl:0, trades:0 }; a[k].pnl += Number(t.pnl||0); a[k].trades++; return a;},{}));
+  const setupData = filteredGrouped('setup').map((item, index) => ({
     ...item,
     fill: item.pnl >= 0 ? `url(#setupWin${index})` : `url(#setupLoss${index})`,
   }));
   const emotionPalette = ['#34f5c5', '#38bdf8', '#8b5cf6', '#ff4d7d', '#f7c948', '#22d3ee'];
-  const emotionData = grouped('emotion').map((item, index) => ({
+  const emotionData = filteredGrouped('emotion').map((item, index) => ({
     ...item,
     fill: emotionPalette[index % emotionPalette.length],
   }));
   const totalEmotionTrades = emotionData.reduce((sum, item) => sum + item.trades, 0);
 
   return <section className="grid analytics">
+    <AnalyticsFilter filter={filter} setFilter={setFilter} customRange={customRange} setCustomRange={setCustomRange} count={filteredTrades.length} total={filteredTotal} rangeLabel={range.label} />
+    {!filteredTrades.length && <div className="card emptyAnalytics"><h3>No trades in this range</h3><p>Try All time or select another custom range.</p></div>}
+
     <div className="card sessionCard setupCard">
       <div className="chartHeader">
         <div>
@@ -213,7 +354,7 @@ function Analytics({ grouped }) {
           <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} width={44} />
           <Tooltip cursor={{ fill: 'rgba(56,189,248,.08)' }} content={<SessionTooltip />} />
           <Bar dataKey="pnl" radius={[16,16,16,16]} barSize={42}>
-            {setupData.map((entry, index) => <Cell key={`setup-cell-${entry.name}`} fill={entry.fill} />)}
+            {setupData.map((entry) => <Cell key={`setup-cell-${entry.name}`} fill={entry.fill} />)}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
@@ -226,7 +367,7 @@ function Analytics({ grouped }) {
       <div className="chartHeader">
         <div>
           <h3>Emotion Analysis</h3>
-          <p>Clean emotion split, aligned and easy to read.</p>
+          <p>Clean mindset split for the selected range.</p>
         </div>
         <span className="livePill">Mindset</span>
       </div>
@@ -236,42 +377,14 @@ function Analytics({ grouped }) {
           <span>trades</span>
         </div>
         <ResponsiveContainer height={300}>
-          <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
             <defs>
-              <filter id="emotionSoftGlow" x="-25%" y="-25%" width="150%" height="150%">
+              <filter id="emotionGlow" x="-30%" y="-30%" width="160%" height="160%">
                 <feGaussianBlur stdDeviation="3" result="blur" />
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
             </defs>
-            <Pie
-              data={[{ name: 'track', trades: Math.max(totalEmotionTrades, 1) }]}
-              dataKey="trades"
-              cx="50%"
-              cy="50%"
-              innerRadius={74}
-              outerRadius={110}
-              startAngle={90}
-              endAngle={-270}
-              isAnimationActive={false}
-              stroke="none"
-              fill="rgba(148,163,184,.08)"
-            />
-            <Pie
-              data={emotionData}
-              dataKey="trades"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius={76}
-              outerRadius={108}
-              startAngle={90}
-              endAngle={-270}
-              paddingAngle={2}
-              cornerRadius={8}
-              stroke="rgba(7,10,18,.92)"
-              strokeWidth={4}
-              filter="url(#emotionSoftGlow)"
-            >
+            <Pie data={emotionData} dataKey="trades" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={104} paddingAngle={2} cornerRadius={8} stroke="rgba(7,10,18,.9)" strokeWidth={4} filter="url(#emotionGlow)">
               {emotionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
             </Pie>
             <Tooltip content={<EmotionTooltip />} />
@@ -283,7 +396,7 @@ function Analytics({ grouped }) {
       </div>
     </div>
 
-    <div className="card"><h3>Session Edge</h3>{grouped('session').map(x=><div className="metric" key={x.name}><span>{x.name}</span><b className={x.pnl>=0?'green':'red'}>{money(x.pnl)}</b></div>)}</div>
+    <div className="card"><h3>Session Edge</h3>{filteredGrouped('session').map(x=><div className="metric" key={x.name}><span>{x.name}</span><b className={x.pnl>=0?'green':'red'}>{money(x.pnl)}</b></div>)}</div>
   </section>
 }
 
