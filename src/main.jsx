@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, Crown, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2 } from 'lucide-react';
+import { Plus, Crown, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Menu, X, Smartphone, Monitor } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import './styles.css';
 
@@ -58,14 +58,23 @@ function App() {
 
   const pageProps = { trades, stats, equity, grouped, form, setForm, addTrade, setTrades };
 
+  const [menuOpen, setMenuOpen] = useState(false);
+  const go = (name) => { setActive(name); setMenuOpen(false); };
+
   return <div className="app">
-    <aside className="sidebar">
+    <div className={`scrim ${menuOpen ? 'show' : ''}`} onClick={() => setMenuOpen(false)} />
+    <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
+      <button className="closeMenu" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={20}/></button>
       <div className="brand"><div className="logo">T</div><div><b>TRADER</b><span>JOURNAL</span></div><Crown size={16}/></div>
-      <nav>{nav.map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>setActive(name)}><Icon size={18}/>{name}</button>)}</nav>
+      <nav>{nav.map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={18}/>{name}</button>)}</nav>
       <div className="plan"><Crown/> <div><b>Premium</b><span>Elite Plan Feeling</span></div></div>
     </aside>
     <main>
-      <header><div><h1>{active}</h1><p>Discipline is your edge. Track, learn, execute.</p></div><button className="primary" onClick={()=>setActive('Trades')}><Plus size={18}/> Add Trade</button></header>
+      <header>
+        <button className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={22}/></button>
+        <div><h1>{active}</h1><p>Discipline is your edge. Track, learn, execute.</p></div>
+        <button className="primary addDesktop" onClick={()=>go('Trades')}><Plus size={18}/> Add Trade</button>
+      </header>
       {active === 'Dashboard' && <Dashboard {...pageProps}/>} 
       {active === 'Trades' && <Trades {...pageProps}/>} 
       {active === 'Analytics' && <Analytics {...pageProps}/>} 
@@ -74,6 +83,8 @@ function App() {
       {active === 'Goals' && <Goals stats={stats}/>} 
       {active === 'Settings' && <SettingsPage/>} 
     </main>
+    <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>
+    <nav className="bottomNav" aria-label="Mobile navigation">{nav.slice(0,5).map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={19}/><span>{name === 'Dashboard' ? 'Home' : name.replace('AI Coach','Coach')}</span></button>)}</nav>
   </div>
 }
 
@@ -81,13 +92,13 @@ function Stat({label, value, sub, icon}) { return <div className="card stat"><sp
 
 function Dashboard({ stats, equity, grouped }) {
   return <>
-    <section className="grid stats">
+    <section className="statsScroller"><div className="grid stats">
       <Stat label="Total PnL" value={money(stats.total)} sub="portfolio performance" icon="↗" />
       <Stat label="Win Rate" value={pct(stats.winRate)} sub={`${stats.wins}W / ${stats.losses}L`} icon="✓" />
       <Stat label="Profit Factor" value={stats.profitFactor.toFixed(2)} sub="premium metric" icon="◆" />
       <Stat label="RR Mediu" value={stats.avgRR.toFixed(2)} sub="risk/reward" icon="⚡" />
       <Stat label="Trades" value={stats.count} sub="logged trades" icon="＋" />
-    </section>
+    </div></section>
     <section className="grid dash">
       <div className="card big"><h3>Equity Curve</h3><ResponsiveContainer height={280}><AreaChart data={equity}><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2f7bff" stopOpacity={0.7}/><stop offset="95%" stopColor="#2f7bff" stopOpacity={0}/></linearGradient></defs><XAxis dataKey="date"/><YAxis/><Tooltip/><Area type="monotone" dataKey="equity" stroke="#38bdf8" fill="url(#g)" strokeWidth={3}/></AreaChart></ResponsiveContainer></div>
       <div className="card"><h3>Performance by Session</h3><ResponsiveContainer height={280}><BarChart data={grouped('session')}><XAxis dataKey="name"/><YAxis/><Tooltip/><Bar dataKey="pnl" radius={[10,10,0,0]}/></BarChart></ResponsiveContainer></div>
@@ -111,7 +122,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
     </form>
-    <div className="card table"><h3>Trade History</h3>{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div><span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span><button onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))}><Trash2 size={16}/></button></div>)}</div>
+    <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className="tradeRow" key={t.id}><div><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div><span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span><button onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))}><Trash2 size={16}/></button></div>)}</div>
   </section>
 }
 
@@ -130,6 +141,6 @@ function Coach({ trades, stats }) {
   return <section className="grid coach"><div className="card ai"><Sparkles/><h2>AI Trading Coach</h2><p>Your edge: {stats.winRate > 60 ? 'good execution and positive expectancy.' : 'needs more selectivity.'}</p></div><div className="card"><h3>Today’s Insight</h3><p>{bad.length ? `You had ${bad.length} emotionally risky trades. Reduce FOMO/greed entries and trade only confirmed setups.` : 'Great emotional control. Keep following your checklist.'}</p></div><div className="card"><h3>Things to Improve</h3><ul><li>Avoid trading after 2 losses.</li><li>Do not move SL too early.</li><li>Focus on London/NY high quality setups.</li></ul></div></section>
 }
 function Goals({ stats }) { return <div className="card goals"><h3>Prop Firm Ready</h3><div className="progress"><span style={{width:`${Math.min(stats.discipline,100)}%`}}/></div><p>Discipline: {stats.discipline}/100 · Target: minimum 80.</p></div> }
-function SettingsPage() { return <div className="card"><h3>Settings</h3><p>This MVP uses localStorage. Next upgrades: Supabase login, cloud sync, image uploads, Stripe paid plan, OpenAI real coach, CSV export.</p></div> }
+function SettingsPage() { return <section className="grid settingsGrid"><div className="card"><h3>Responsive App</h3><p><Smartphone size={16}/> iPhone-first layout with bottom navigation, safe-area support and thumb-friendly buttons.</p><p><Monitor size={16}/> Desktop layout keeps the premium sidebar and wide analytics dashboards.</p></div><div className="card"><h3>Next Production Upgrades</h3><p>This MVP uses localStorage. Next upgrades: Supabase login, cloud sync, image uploads, Stripe paid plan, OpenAI real coach, CSV export.</p></div></section> }
 
 createRoot(document.getElementById('root')).render(<App />);
