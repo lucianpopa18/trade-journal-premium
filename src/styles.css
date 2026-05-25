@@ -23,3 +23,13 @@
 @media(max-width:1180px){.setupCard{grid-column:1/-1}}
 @media(max-width:820px){.setupCard{min-height:auto}.setupCard .chartHeader,.emotionCard .chartHeader{padding:0 2px}.setupCard .recharts-responsive-container,.emotionCard .recharts-responsive-container{margin-left:-8px;margin-right:-8px}.emotionLegend{grid-template-columns:1fr 1fr}.emotionCenter{width:98px;height:98px}.emotionCenter strong{font-size:26px}}
 @media(max-width:430px){.setupLegend{display:grid;grid-template-columns:1fr}.setupLegend span{justify-content:space-between}.emotionLegend{grid-template-columns:1fr}.emotionCard .livePill,.setupCard .livePill{display:none}}
+
+
+/* v7: aligned clean emotion donut */
+.emotionWrap{display:grid;place-items:center;min-height:300px}
+.emotionWrap .recharts-responsive-container{width:100%!important;max-width:420px;margin:0 auto!important}
+.emotionCenter{top:50%;left:50%;width:108px;height:108px;transform:translate(-50%,-50%);background:radial-gradient(circle at 35% 25%,rgba(255,255,255,.13),rgba(10,18,34,.95) 58%,rgba(5,10,22,.98));border:1px solid rgba(148,163,184,.26);box-shadow:inset 0 1px rgba(255,255,255,.14),0 0 0 10px rgba(15,23,42,.34),0 18px 55px rgba(0,0,0,.35)}
+.emotionCenter strong{font-size:32px}.emotionCenter span{font-size:11px;letter-spacing:.16em;color:#a8b3c7}
+.emotionCard .recharts-sector{outline:none}.emotionCard .recharts-pie-sector:hover{filter:brightness(1.08) saturate(1.08)}
+@media(max-width:820px){.emotionWrap{min-height:280px}.emotionWrap .recharts-responsive-container{max-width:360px}.emotionCenter{width:96px;height:96px}.emotionCenter strong{font-size:28px}}
+@media(max-width:430px){.emotionWrap{min-height:250px}.emotionWrap .recharts-responsive-container{max-width:310px}.emotionCenter{width:84px;height:84px}.emotionCenter strong{font-size:24px}.emotionCenter span{font-size:9px}}

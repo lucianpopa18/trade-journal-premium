@@ -226,7 +226,7 @@ function Analytics({ grouped }) {
       <div className="chartHeader">
         <div>
           <h3>Emotion Analysis</h3>
-          <p>Donut chart with glow, labels and trade count.</p>
+          <p>Clean emotion split, aligned and easy to read.</p>
         </div>
         <span className="livePill">Mindset</span>
       </div>
@@ -236,14 +236,42 @@ function Analytics({ grouped }) {
           <span>trades</span>
         </div>
         <ResponsiveContainer height={300}>
-          <PieChart>
+          <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
             <defs>
-              <filter id="emotionGlow" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="5" result="blur" />
+              <filter id="emotionSoftGlow" x="-25%" y="-25%" width="150%" height="150%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
                 <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
               </filter>
             </defs>
-            <Pie data={emotionData} dataKey="trades" nameKey="name" innerRadius={66} outerRadius={104} paddingAngle={5} cornerRadius={14} stroke="rgba(255,255,255,.08)" strokeWidth={2} filter="url(#emotionGlow)">
+            <Pie
+              data={[{ name: 'track', trades: Math.max(totalEmotionTrades, 1) }]}
+              dataKey="trades"
+              cx="50%"
+              cy="50%"
+              innerRadius={74}
+              outerRadius={110}
+              startAngle={90}
+              endAngle={-270}
+              isAnimationActive={false}
+              stroke="none"
+              fill="rgba(148,163,184,.08)"
+            />
+            <Pie
+              data={emotionData}
+              dataKey="trades"
+              nameKey="name"
+              cx="50%"
+              cy="50%"
+              innerRadius={76}
+              outerRadius={108}
+              startAngle={90}
+              endAngle={-270}
+              paddingAngle={2}
+              cornerRadius={8}
+              stroke="rgba(7,10,18,.92)"
+              strokeWidth={4}
+              filter="url(#emotionSoftGlow)"
+            >
               {emotionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
             </Pie>
             <Tooltip content={<EmotionTooltip />} />
