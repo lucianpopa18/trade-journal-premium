@@ -65,14 +65,14 @@ function App() {
     <div className={`scrim ${menuOpen ? 'show' : ''}`} onClick={() => setMenuOpen(false)} />
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
       <button className="closeMenu" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={20}/></button>
-      <div className="brand"><div className="logo">S</div><div><b>SKRTZ</b><span>Trading Jurnal</span></div><BadgeCheck size={16}/></div>
+      <div className="brand"><div className="logo" aria-label="SKRTZ logo"><svg viewBox="0 0 64 64" role="img"><path d="M12 44 L24 32 L34 38 L52 18"/><path d="M52 18 V32 M52 18 H38"/><rect x="17" y="18" width="5" height="30" rx="2"/><rect x="30" y="24" width="5" height="24" rx="2"/><rect x="43" y="13" width="5" height="35" rx="2"/></svg></div><div><b>SKRTZ</b><span>Trading Journal</span></div><BadgeCheck size={16}/></div>
       <nav>{nav.map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={18}/>{name}</button>)}</nav>
       <div className="plan"><ShieldCheck/> <div><b>SKRTZ Method</b><span>Rules. Risk. Discipline.</span></div></div>
     </aside>
     <main>
       <header>
         <button className="menuButton" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Menu size={22}/></button>
-        <div><h1>{active}</h1><p>Discipline is your edge. Track, learn, execute.</p></div>
+        <div className="pageTitle"><h1>{active}</h1><p>Track your trades. Master your discipline.</p></div>
         <button className="primary addDesktop" onClick={()=>go('Trades')}><Plus size={18}/> Add Trade</button>
       </header>
       {active === 'Dashboard' && <Dashboard {...pageProps}/>} 
