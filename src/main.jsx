@@ -300,6 +300,60 @@ function EmotionTooltip({ active, payload }) {
   </div>
 }
 
+
+function EmotionDonut({ data, total }) {
+  const size = 240;
+  const center = size / 2;
+  const radius = 74;
+  const stroke = 30;
+  const circumference = 2 * Math.PI * radius;
+  const gap = data.length > 1 ? 7 : 0;
+  let offset = 0;
+
+  if (!data.length || !total) {
+    return <div className="emotionDonutBox emptyDonut">
+      <svg className="emotionDonut" viewBox={`0 0 ${size} ${size}`} aria-label="No emotion data">
+        <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(148,163,184,.12)" strokeWidth={stroke} />
+      </svg>
+      <div className="emotionCenter"><strong>0</strong><span>trades</span></div>
+    </div>
+  }
+
+  return <div className="emotionDonutBox">
+    <svg className="emotionDonut" viewBox={`0 0 ${size} ${size}`} aria-label="Emotion analysis chart">
+      <defs>
+        <filter id="svgEmotionGlow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <circle className="emotionTrack" cx={center} cy={center} r={radius} fill="none" strokeWidth={stroke} />
+      {data.map(item => {
+        const rawLength = (item.trades / total) * circumference;
+        const length = Math.max(0, rawLength - gap);
+        const dashOffset = -offset;
+        offset += rawLength;
+        return <circle
+          key={item.name}
+          className="emotionArc"
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={item.fill}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${length} ${circumference - length}`}
+          strokeDashoffset={dashOffset}
+          transform={`rotate(-90 ${center} ${center})`}
+          filter="url(#svgEmotionGlow)"
+        />
+      })}
+    </svg>
+    <div className="emotionCenter"><strong>{total}</strong><span>trades</span></div>
+  </div>
+}
+
 function Analytics({ trades }) {
   const [filter, setFilter] = useState('All time');
   const [customRange, setCustomRange] = useState({ start: '', end: '' });
@@ -372,24 +426,7 @@ function Analytics({ trades }) {
         <span className="livePill">Mindset</span>
       </div>
       <div className="emotionWrap">
-        <div className="emotionCenter">
-          <strong>{totalEmotionTrades}</strong>
-          <span>trades</span>
-        </div>
-        <ResponsiveContainer height={300}>
-          <PieChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
-            <defs>
-              <filter id="emotionGlow" x="-30%" y="-30%" width="160%" height="160%">
-                <feGaussianBlur stdDeviation="3" result="blur" />
-                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-              </filter>
-            </defs>
-            <Pie data={emotionData} dataKey="trades" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={104} paddingAngle={2} cornerRadius={8} stroke="rgba(7,10,18,.9)" strokeWidth={4} filter="url(#emotionGlow)">
-              {emotionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
-            </Pie>
-            <Tooltip content={<EmotionTooltip />} />
-          </PieChart>
-        </ResponsiveContainer>
+        <EmotionDonut data={emotionData} total={totalEmotionTrades} />
       </div>
       <div className="emotionLegend">
         {emotionData.map(item => <span key={item.name}><i style={{background:item.fill, boxShadow:`0 0 14px ${item.fill}`}} />{item.name}<b>{item.trades}</b></span>)}
