@@ -169,8 +169,94 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   </section>
 }
 
+function EmotionTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const item = payload[0].payload;
+  return <div className="chartTooltip">
+    <b>{item.name}</b>
+    <span>{item.trades} trades</span>
+    <small>{item.pnl >= 0 ? 'Positive emotion profile' : 'Review these entries'}</small>
+  </div>
+}
+
 function Analytics({ grouped }) {
-  return <section className="grid analytics"><div className="card"><h3>Best Setups</h3><ResponsiveContainer height={280}><BarChart data={grouped('setup')}><XAxis dataKey="name" hide/><YAxis/><Tooltip/><Bar dataKey="pnl" radius={[10,10,0,0]}/></BarChart></ResponsiveContainer></div><div className="card"><h3>Emotion Analysis</h3><ResponsiveContainer height={280}><PieChart><Pie data={grouped('emotion')} dataKey="trades" nameKey="name" outerRadius={95} label>{grouped('emotion').map((_,i)=><Cell key={i}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer></div><div className="card"><h3>Session Edge</h3>{grouped('session').map(x=><div className="metric" key={x.name}><span>{x.name}</span><b className={x.pnl>=0?'green':'red'}>{money(x.pnl)}</b></div>)}</div></section>
+  const setupData = grouped('setup').map((item, index) => ({
+    ...item,
+    fill: item.pnl >= 0 ? `url(#setupWin${index})` : `url(#setupLoss${index})`,
+  }));
+  const emotionPalette = ['#34f5c5', '#38bdf8', '#8b5cf6', '#ff4d7d', '#f7c948', '#22d3ee'];
+  const emotionData = grouped('emotion').map((item, index) => ({
+    ...item,
+    fill: emotionPalette[index % emotionPalette.length],
+  }));
+  const totalEmotionTrades = emotionData.reduce((sum, item) => sum + item.trades, 0);
+
+  return <section className="grid analytics">
+    <div className="card sessionCard setupCard">
+      <div className="chartHeader">
+        <div>
+          <h3>Best Setups</h3>
+          <p>Same visual edge map as your session performance.</p>
+        </div>
+        <span className="livePill">Setup edge</span>
+      </div>
+      <ResponsiveContainer height={300}>
+        <BarChart data={setupData} margin={{ top: 18, right: 12, left: -12, bottom: 8 }}>
+          <defs>
+            {setupData.map((item, index) => <linearGradient key={`setup-g-${item.name}`} id={item.pnl >= 0 ? `setupWin${index}` : `setupLoss${index}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={item.pnl >= 0 ? '#34f5c5' : '#ff4d7d'} stopOpacity={1}/>
+              <stop offset="58%" stopColor={item.pnl >= 0 ? '#2f7bff' : '#8b1dff'} stopOpacity={0.92}/>
+              <stop offset="100%" stopColor={item.pnl >= 0 ? '#15295f' : '#3a1025'} stopOpacity={0.82}/>
+            </linearGradient>)}
+          </defs>
+          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 800 }} interval={0} angle={-14} textAnchor="end" height={54} />
+          <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} width={44} />
+          <Tooltip cursor={{ fill: 'rgba(56,189,248,.08)' }} content={<SessionTooltip />} />
+          <Bar dataKey="pnl" radius={[16,16,16,16]} barSize={42}>
+            {setupData.map((entry, index) => <Cell key={`setup-cell-${entry.name}`} fill={entry.fill} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div className="sessionLegend setupLegend">
+        {setupData.map(item => <span key={item.name}><i className={item.pnl >= 0 ? 'winDot' : 'lossDot'} />{item.name}: <b className={item.pnl >= 0 ? 'green' : 'red'}>{money(item.pnl)}</b></span>)}
+      </div>
+    </div>
+
+    <div className="card emotionCard">
+      <div className="chartHeader">
+        <div>
+          <h3>Emotion Analysis</h3>
+          <p>Donut chart with glow, labels and trade count.</p>
+        </div>
+        <span className="livePill">Mindset</span>
+      </div>
+      <div className="emotionWrap">
+        <div className="emotionCenter">
+          <strong>{totalEmotionTrades}</strong>
+          <span>trades</span>
+        </div>
+        <ResponsiveContainer height={300}>
+          <PieChart>
+            <defs>
+              <filter id="emotionGlow" x="-40%" y="-40%" width="180%" height="180%">
+                <feGaussianBlur stdDeviation="5" result="blur" />
+                <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <Pie data={emotionData} dataKey="trades" nameKey="name" innerRadius={66} outerRadius={104} paddingAngle={5} cornerRadius={14} stroke="rgba(255,255,255,.08)" strokeWidth={2} filter="url(#emotionGlow)">
+              {emotionData.map((entry) => <Cell key={entry.name} fill={entry.fill} />)}
+            </Pie>
+            <Tooltip content={<EmotionTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="emotionLegend">
+        {emotionData.map(item => <span key={item.name}><i style={{background:item.fill, boxShadow:`0 0 14px ${item.fill}`}} />{item.name}<b>{item.trades}</b></span>)}
+      </div>
+    </div>
+
+    <div className="card"><h3>Session Edge</h3>{grouped('session').map(x=><div className="metric" key={x.name}><span>{x.name}</span><b className={x.pnl>=0?'green':'red'}>{money(x.pnl)}</b></div>)}</div>
+  </section>
 }
 
 function CalendarPage({ trades, stats }) {
