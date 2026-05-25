@@ -196,6 +196,9 @@ function DetailItem({ label, value, tone }) {
 }
 
 function TradeDetailsModal({ trade, onClose, onEdit }) {
+  useEffect(() => {
+    if (trade) requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  }, [trade]);
   if (!trade) return null;
   const resultTone = Number(trade.pnl) >= 0 ? 'green' : 'red';
   return <div className="modalBackdrop" onClick={onClose}>
@@ -280,8 +283,8 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
       <span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span>
       <div className="tradeActions">
-        <button className="iconAction viewAction" type="button" onClick={()=>setDetailTrade(t)} title="View details"><Eye size={16}/><em>View</em></button>
-        <button className="iconAction editAction" type="button" onClick={()=>startEdit(t)} title="Edit trade"><Pencil size={16}/><em>Edit</em></button>
+        <button className="iconAction viewAction iconOnly" type="button" onClick={()=>setDetailTrade(t)} title="View details" aria-label="View trade details"><Eye size={17}/></button>
+        <button className="iconAction editAction iconOnly" type="button" onClick={()=>startEdit(t)} title="Edit trade" aria-label="Edit trade"><Pencil size={17}/></button>
         <button className="iconAction deleteAction" type="button" onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))} title="Delete trade"><Trash2 size={16}/></button>
       </div>
     </div>)}</div>
