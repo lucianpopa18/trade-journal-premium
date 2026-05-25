@@ -1,4 +1,4 @@
-# Trader Journal Premium
+# SKRTZ Trading Journal
 
 Premium dark-mode trading journal MVP built with React + Vite.
 
