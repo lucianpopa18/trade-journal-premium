@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, Crown, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Menu, X, Smartphone, Monitor } from 'lucide-react';
+import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Menu, X, Smartphone, Monitor, BadgeCheck, WalletCards, Percent, Moon } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import './styles.css';
 
@@ -24,10 +24,10 @@ function pct(n) { return `${n.toFixed(1)}%`; }
 
 function App() {
   const [active, setActive] = useState('Dashboard');
-  const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('premiumTrades') || 'null') || starterTrades);
+  const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('skrtzTrades') || 'null') || starterTrades);
   const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '' });
 
-  useEffect(() => localStorage.setItem('premiumTrades', JSON.stringify(trades)), [trades]);
+  useEffect(() => localStorage.setItem('skrtzTrades', JSON.stringify(trades)), [trades]);
 
   const stats = useMemo(() => {
     const total = trades.reduce((a, t) => a + Number(t.pnl || 0), 0);
@@ -65,9 +65,9 @@ function App() {
     <div className={`scrim ${menuOpen ? 'show' : ''}`} onClick={() => setMenuOpen(false)} />
     <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
       <button className="closeMenu" onClick={() => setMenuOpen(false)} aria-label="Close menu"><X size={20}/></button>
-      <div className="brand"><div className="logo">T</div><div><b>TRADER</b><span>JOURNAL</span></div><Crown size={16}/></div>
+      <div className="brand"><div className="logo">S</div><div><b>SKRTZ</b><span>Trading Jurnal</span></div><BadgeCheck size={16}/></div>
       <nav>{nav.map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={18}/>{name}</button>)}</nav>
-      <div className="plan"><Crown/> <div><b>Premium</b><span>Elite Plan Feeling</span></div></div>
+      <div className="plan"><ShieldCheck/> <div><b>SKRTZ Method</b><span>Rules. Risk. Discipline.</span></div></div>
     </aside>
     <main>
       <header>
@@ -95,7 +95,7 @@ function Dashboard({ stats, equity, grouped }) {
     <section className="statsScroller"><div className="grid stats">
       <Stat label="Total PnL" value={money(stats.total)} sub="portfolio performance" icon="↗" />
       <Stat label="Win Rate" value={pct(stats.winRate)} sub={`${stats.wins}W / ${stats.losses}L`} icon="✓" />
-      <Stat label="Profit Factor" value={stats.profitFactor.toFixed(2)} sub="premium metric" icon="◆" />
+      <Stat label="Profit Factor" value={stats.profitFactor.toFixed(2)} sub="expectancy metric" icon="◆" />
       <Stat label="RR Mediu" value={stats.avgRR.toFixed(2)} sub="risk/reward" icon="⚡" />
       <Stat label="Trades" value={stats.count} sub="logged trades" icon="＋" />
     </div></section>
@@ -141,6 +141,39 @@ function Coach({ trades, stats }) {
   return <section className="grid coach"><div className="card ai"><Sparkles/><h2>AI Trading Coach</h2><p>Your edge: {stats.winRate > 60 ? 'good execution and positive expectancy.' : 'needs more selectivity.'}</p></div><div className="card"><h3>Today’s Insight</h3><p>{bad.length ? `You had ${bad.length} emotionally risky trades. Reduce FOMO/greed entries and trade only confirmed setups.` : 'Great emotional control. Keep following your checklist.'}</p></div><div className="card"><h3>Things to Improve</h3><ul><li>Avoid trading after 2 losses.</li><li>Do not move SL too early.</li><li>Focus on London/NY high quality setups.</li></ul></div></section>
 }
 function Goals({ stats }) { return <div className="card goals"><h3>Prop Firm Ready</h3><div className="progress"><span style={{width:`${Math.min(stats.discipline,100)}%`}}/></div><p>Discipline: {stats.discipline}/100 · Target: minimum 80.</p></div> }
-function SettingsPage() { return <section className="grid settingsGrid"><div className="card"><h3>Responsive App</h3><p><Smartphone size={16}/> iPhone-first layout with bottom navigation, safe-area support and thumb-friendly buttons.</p><p><Monitor size={16}/> Desktop layout keeps the premium sidebar and wide analytics dashboards.</p></div><div className="card"><h3>Next Production Upgrades</h3><p>This MVP uses localStorage. Next upgrades: Supabase login, cloud sync, image uploads, Stripe paid plan, OpenAI real coach, CSV export.</p></div></section> }
+function SettingsPage() {
+  const defaults = { accountSize: 10000, currency: 'USD', riskPerTrade: 1, maxDailyLoss: 3, maxTradesDay: 3, mainPair: 'XAUUSD', mainSession: 'London', journalMode: 'Strict', theme: 'Dark' };
+  const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('skrtzSettings') || 'null') || defaults);
+  useEffect(() => localStorage.setItem('skrtzSettings', JSON.stringify(settings)), [settings]);
+  const update = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
+  const reset = () => setSettings(defaults);
+
+  return <section className="grid settingsGrid">
+    <div className="card form"><h3>Account & Risk Settings</h3>
+      <div className="formgrid">
+        <label>Account Size<input type="number" value={settings.accountSize} onChange={e=>update('accountSize', e.target.value)}/></label>
+        <label>Currency<select value={settings.currency} onChange={e=>update('currency', e.target.value)}><option>USD</option><option>EUR</option><option>GBP</option><option>RON</option></select></label>
+        <label>Risk Per Trade %<input type="number" step="0.1" value={settings.riskPerTrade} onChange={e=>update('riskPerTrade', e.target.value)}/></label>
+        <label>Max Daily Loss %<input type="number" step="0.1" value={settings.maxDailyLoss} onChange={e=>update('maxDailyLoss', e.target.value)}/></label>
+        <label>Max Trades / Day<input type="number" value={settings.maxTradesDay} onChange={e=>update('maxTradesDay', e.target.value)}/></label>
+        <label>Journal Mode<select value={settings.journalMode} onChange={e=>update('journalMode', e.target.value)}><option>Strict</option><option>Balanced</option><option>Review Only</option></select></label>
+      </div>
+    </div>
+    <div className="card form"><h3>Trading Preferences</h3>
+      <div className="formgrid">
+        <label>Main Pair<input value={settings.mainPair} onChange={e=>update('mainPair', e.target.value.toUpperCase())}/></label>
+        <label>Main Session<select value={settings.mainSession} onChange={e=>update('mainSession', e.target.value)}><option>London</option><option>NY</option><option>Asia</option></select></label>
+        <label>Theme<select value={settings.theme} onChange={e=>update('theme', e.target.value)}><option>Dark</option><option>Midnight</option><option>Clean</option></select></label>
+      </div>
+      <div className="settingsPreview">
+        <p><WalletCards size={16}/> Risk value: <b>{settings.currency} {((Number(settings.accountSize || 0) * Number(settings.riskPerTrade || 0)) / 100).toFixed(2)}</b> per trade.</p>
+        <p><Percent size={16}/> Daily stop: <b>{settings.currency} {((Number(settings.accountSize || 0) * Number(settings.maxDailyLoss || 0)) / 100).toFixed(2)}</b>.</p>
+        <p><Moon size={16}/> Saved locally on this device.</p>
+      </div>
+      <button className="primary full" type="button" onClick={reset}>Reset Settings</button>
+    </div>
+    <div className="card"><h3>Responsive App</h3><p><Smartphone size={16}/> iPhone-first layout with bottom navigation, safe-area support and thumb-friendly buttons.</p><p><Monitor size={16}/> Desktop layout keeps the sidebar and wide analytics dashboards.</p></div>
+  </section>
+}
 
 createRoot(document.getElementById('root')).render(<App />);

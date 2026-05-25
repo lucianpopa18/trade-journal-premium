@@ -1,6 +1,6 @@
 # SKRTZ Trading Journal
 
-Premium dark-mode trading journal MVP built with React + Vite.
+Dark-mode trading journal built with React + Vite.
 
 ## What is new in this version
 - iPhone-first responsive layout
@@ -14,7 +14,7 @@ Premium dark-mode trading journal MVP built with React + Vite.
 - Improved card spacing, touch targets and calendar scaling
 
 ## Features
-- Premium dashboard with PnL, win rate, profit factor, RR, drawdown and discipline score
+- Dashboard with PnL, win rate, profit factor, RR, drawdown and discipline score
 - Add trades with symbol, direction, session, entry, SL, TP, risk, lot, emotion, setup and notes
 - Local browser storage persistence
 - Analytics by session, setup and emotion
@@ -37,7 +37,7 @@ npm run build
 ```bash
 git init
 git add .
-git commit -m "Initial premium trading journal MVP"
+git commit -m "Initial SKRTZ trading journal"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
 git push -u origin main
