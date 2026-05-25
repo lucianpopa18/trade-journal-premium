@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap } from 'lucide-react';
+import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import './styles.css';
 
@@ -31,7 +31,7 @@ function App() {
     const savedTheme = savedSettings?.theme || 'Dark';
     document.documentElement.setAttribute('data-theme', savedTheme.toLowerCase());
   }, []);
-  const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '' });
+  const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '' });
 
   useEffect(() => localStorage.setItem('skrtzTrades', JSON.stringify(trades)), [trades]);
 
@@ -59,7 +59,7 @@ function App() {
     const raw = form.entry && form.tp ? (Number(form.tp)-Number(form.entry)) * signed : 0;
     const pnl = form.pnl !== undefined && form.pnl !== '' ? Number(form.pnl) : Math.round(raw * 100 * Number(form.lot || 1));
     setTrades([{ ...form, id: Date.now(), rr: Number(rr.toFixed(2)), pnl }, ...trades]);
-    setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '' });
+    setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '' });
   }
 
   const pageProps = { trades, stats, equity, grouped, form, setForm, addTrade, setTrades };
@@ -189,6 +189,68 @@ function Dashboard({ stats, equity, grouped }) {
   </>
 }
 
+
+function fileToDataUrl(file, callback) {
+  if (!file) return;
+  if (!file.type?.startsWith('image/')) {
+    alert('Please upload an image screenshot.');
+    return;
+  }
+  if (file.size > 4 * 1024 * 1024) {
+    alert('Screenshot is too large. Please use an image under 4MB.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => callback(String(reader.result || ''));
+  reader.readAsDataURL(file);
+}
+
+function isSafeImageUrl(value) {
+  if (!value?.trim()) return false;
+  try {
+    const url = new URL(value.trim());
+    return ['http:', 'https:'].includes(url.protocol);
+  } catch { return false; }
+}
+
+function SetupPreview({ src, alt = 'Trade setup screenshot preview', className = '' }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  if (!src) return null;
+  if (failed) return <div className={`imageFallback ${className}`}><ImageIcon size={25}/><b>Preview unavailable</b><small>Open the TradingView link to see the setup.</small></div>;
+  return <img className={className} src={src} alt={alt} onError={() => setFailed(true)} />;
+}
+
+function ScreenshotPicker({ value, urlValue = '', onChange, onUrlChange, label = 'Setup Screenshot' }) {
+  const pastedUrl = urlValue?.trim() || '';
+  const activeSrc = pastedUrl || value;
+  const isTvLink = /(?:www\.)?tradingview\.com\/x\//i.test(pastedUrl);
+  const clearMedia = () => { onChange(''); onUrlChange(''); };
+  return <div className="screenshotPicker wide">
+    <div className="screenshotPickerTop">
+      <span>{label}</span>
+      {activeSrc && <button type="button" onClick={clearMedia}>Remove</button>}
+    </div>
+    <label className={`screenshotDrop ${activeSrc ? 'hasImage' : ''}`}>
+      {activeSrc ? <SetupPreview src={activeSrc} /> : <div><ImagePlus size={26}/><b>Upload chart image</b><small>or paste a TradingView snapshot link below</small></div>}
+      <input type="file" accept="image/*" onChange={e => fileToDataUrl(e.target.files?.[0], image => { onChange(image); onUrlChange(''); })} />
+    </label>
+    <div className="urlShotField">
+      <Link2 size={17}/>
+      <input
+        type="url"
+        inputMode="url"
+        placeholder="Paste TradingView snapshot link…"
+        value={urlValue}
+        onChange={e => onUrlChange(e.target.value)}
+      />
+    </div>
+    {pastedUrl && <div className={`urlFeedback ${isSafeImageUrl(pastedUrl) ? 'ready' : 'invalid'}`}>
+      {isSafeImageUrl(pastedUrl) ? <><span>{isTvLink ? 'TradingView snapshot linked' : 'Image link linked'}</span><a href={pastedUrl} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Open link</a></> : <span>Paste a valid https link.</span>}
+    </div>}
+  </div>
+}
+
 function calculateTradeValues(data) {
   const rr = data.entry && data.sl && data.tp ? Math.abs((Number(data.tp)-Number(data.entry))/(Number(data.entry)-Number(data.sl))) : Number(data.rr || 0);
   const signed = data.direction === 'Long' ? 1 : -1;
@@ -221,6 +283,7 @@ function TradeDetailsModal({ trade, onClose, onEdit }) {
         </div>
         <strong className={resultTone}>{money(Number(trade.pnl || 0))}</strong>
       </div>
+      {(trade.screenshotUrl || trade.screenshot) && <div className="tradeScreenshotWrap"><div className="tradeScreenshot"><SetupPreview src={trade.screenshotUrl || trade.screenshot} alt="Trade setup screenshot" /></div>{trade.screenshotUrl && <a className="openSetupLink" href={trade.screenshotUrl} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Open original setup link</a>}</div>}
       <div className="detailGrid">
         <DetailItem label="Entry" value={trade.entry} />
         <DetailItem label="Stop Loss" value={trade.sl} tone="red" />
@@ -254,6 +317,7 @@ function EditTradeModal({ trade, setTrade, onSave, onClose }) {
         <label>Setup<select value={trade.setup} onChange={e=>setTrade({...trade,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
         {fields.map(([k,l])=><label key={k}>{l}<input value={trade[k] ?? ''} onChange={e=>setTrade({...trade,[k]:e.target.value})}/></label>)}
         <label>Confidence<input type="range" min="1" max="10" value={trade.confidence || 5} onChange={e=>setTrade({...trade,confidence:e.target.value})}/></label>
+        <ScreenshotPicker value={trade.screenshot || ''} urlValue={trade.screenshotUrl || ''} onChange={value=>setTrade({...trade,screenshot:value})} onUrlChange={value=>setTrade({...trade,screenshotUrl:value})} />
         <label className="wide">Notes<textarea value={trade.notes || ''} onChange={e=>setTrade({...trade,notes:e.target.value})}/></label>
       </div>
     </form>
@@ -282,11 +346,12 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label>Setup<select value={form.setup} onChange={e=>setForm({...form,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
       {fields.map(([k,l])=><label key={k}>{l}<input value={form[k] || ''} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}
       <label>Confidence<input type="range" min="1" max="10" value={form.confidence} onChange={e=>setForm({...form,confidence:e.target.value})}/></label>
+      <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value=>setForm({...form,screenshot:value})} onUrlChange={value=>setForm({...form,screenshotUrl:value})} />
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
     </form>
     <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className="tradeRow enhancedTradeRow" key={t.id}>
-      <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
+      <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}{(t.screenshot || t.screenshotUrl) && <ImageIcon className="rowShotIcon" size={14}/>}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
       <span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span>
       <div className="tradeActions">
         <button className="iconAction viewAction iconOnly" type="button" onClick={()=>setDetailTrade(t)} title="View details" aria-label="View trade details"><Eye size={17}/></button>
