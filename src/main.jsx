@@ -25,6 +25,12 @@ function pct(n) { return `${n.toFixed(1)}%`; }
 function App() {
   const [active, setActive] = useState('Dashboard');
   const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('skrtzTrades') || 'null') || starterTrades);
+
+  useEffect(() => {
+    const savedSettings = JSON.parse(localStorage.getItem('skrtzSettings') || 'null');
+    const savedTheme = savedSettings?.theme || 'Dark';
+    document.documentElement.setAttribute('data-theme', savedTheme.toLowerCase());
+  }, []);
   const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '' });
 
   useEffect(() => localStorage.setItem('skrtzTrades', JSON.stringify(trades)), [trades]);
@@ -454,7 +460,12 @@ function Goals({ stats }) { return <div className="card goals"><h3>Prop Firm Rea
 function SettingsPage() {
   const defaults = { accountSize: 10000, currency: 'USD', riskPerTrade: 1, maxDailyLoss: 3, maxTradesDay: 3, mainPair: 'XAUUSD', mainSession: 'London', journalMode: 'Strict', theme: 'Dark' };
   const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('skrtzSettings') || 'null') || defaults);
-  useEffect(() => localStorage.setItem('skrtzSettings', JSON.stringify(settings)), [settings]);
+
+  useEffect(() => {
+    localStorage.setItem('skrtzSettings', JSON.stringify(settings));
+    document.documentElement.setAttribute('data-theme', (settings.theme || 'Dark').toLowerCase());
+  }, [settings]);
+
   const update = (key, value) => setSettings(prev => ({ ...prev, [key]: value }));
   const reset = () => setSettings(defaults);
 

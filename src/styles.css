@@ -100,3 +100,29 @@
   .enhancedTradeRow{grid-template-columns:minmax(0,1fr) auto!important;grid-template-areas:"main pnl" "actions actions"!important;}
   .enhancedTradeRow .tradeActions{display:flex!important;justify-content:flex-end!important;gap:8px!important;}
 }
+
+/* v13: real selectable app themes */
+html[data-theme="dark"]{
+  --bg:#070a12;--panel:#0d1324;--panel2:#111a31;--text:#f8fbff;--muted:#93a4bd;--blue:#2675ff;--cyan:#22d3ee;--green:#19e68c;--red:#ff3864;--purple:#8b5cf6;--border:rgba(148,163,184,.16);
+}
+html[data-theme="midnight"]{
+  --bg:#020617;--panel:#07111f;--panel2:#0b1730;--text:#f8fbff;--muted:#8ea3c3;--blue:#38bdf8;--cyan:#00e5ff;--green:#34d399;--red:#fb7185;--purple:#a78bfa;--border:rgba(56,189,248,.20);
+}
+html[data-theme="clean"]{
+  --bg:#eef4ff;--panel:#ffffff;--panel2:#eaf2ff;--text:#101827;--muted:#53657f;--blue:#2563eb;--cyan:#0891b2;--green:#059669;--red:#e11d48;--purple:#7c3aed;--border:rgba(37,99,235,.16);
+}
+html[data-theme="midnight"] body{background:radial-gradient(circle at 22% 0%,rgba(34,211,238,.16),transparent 28%),radial-gradient(circle at 100% 0%,rgba(139,92,246,.22),transparent 38%),linear-gradient(180deg,#020617,#050816 55%,#020617)!important;}
+html[data-theme="clean"] body{background:radial-gradient(circle at top right,rgba(37,99,235,.18),transparent 32%),linear-gradient(180deg,#f8fbff,#eaf2ff 62%,#dbeafe)!important;color:var(--text)!important;}
+html[data-theme="clean"] .card,
+html[data-theme="clean"] .tradeModal{background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(235,243,255,.94))!important;box-shadow:0 18px 60px rgba(37,99,235,.16), inset 0 1px rgba(255,255,255,.8)!important;}
+html[data-theme="clean"] .sidebar{background:rgba(246,250,255,.86)!important;}
+html[data-theme="clean"] input,
+html[data-theme="clean"] select,
+html[data-theme="clean"] textarea{background:#f8fbff!important;color:#101827!important;border-color:rgba(37,99,235,.20)!important;}
+html[data-theme="clean"] .tradeRow button,
+html[data-theme="clean"] .iconAction{background:rgba(255,255,255,.78)!important;color:#1f2937!important;}
+html[data-theme="clean"] p,
+html[data-theme="clean"] small,
+html[data-theme="clean"] span{color:var(--muted);}
+html[data-theme="midnight"] .card{background:linear-gradient(180deg,rgba(8,20,38,.96),rgba(3,8,20,.94))!important;border-color:rgba(56,189,248,.19)!important;box-shadow:0 20px 80px rgba(0,0,0,.55),0 0 34px rgba(34,211,238,.07),inset 0 1px rgba(255,255,255,.05)!important;}
+html[data-theme="midnight"] .primary{box-shadow:0 0 40px rgba(34,211,238,.34)!important;}
