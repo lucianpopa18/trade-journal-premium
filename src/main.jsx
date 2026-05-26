@@ -150,7 +150,10 @@ function App() {
       try { await saveTradeScreenshot(newTrade.id, newTrade.screenshot); }
       catch { alert('The trade was saved, but the screenshot could not be stored.'); }
     }
-    setTrades([newTrade, ...trades]);
+    // Functional updater: after the await above, the `trades` closure may be
+    // stale (hydration could have finished meanwhile). This always prepends to
+    // the freshest list so neither the trade nor its screenshot gets dropped.
+    setTrades(current => [newTrade, ...current]);
     setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '' });
   }
 
@@ -518,7 +521,7 @@ function EditTradeModal({ trade, setTrade, onSave, onClose }) {
         <label>Setup<select value={trade.setup} onChange={e=>setTrade({...trade,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
         {fields.map(([k,l])=><label key={k}>{l}<input value={trade[k] ?? ''} onChange={e=>setTrade({...trade,[k]:e.target.value})}/></label>)}
         <label>Confidence<input type="range" min="1" max="10" value={trade.confidence || 5} onChange={e=>setTrade({...trade,confidence:e.target.value})}/></label>
-        <ScreenshotPicker value={trade.screenshot || ''} urlValue={trade.screenshotUrl || ''} onChange={value=>setTrade({...trade,screenshot:value})} onUrlChange={value=>setTrade({...trade,screenshotUrl:value})} />
+        <ScreenshotPicker value={trade.screenshot || ''} urlValue={trade.screenshotUrl || ''} onChange={value=>setTrade(t=>({...t,screenshot:value}))} onUrlChange={value=>setTrade(t=>({...t,screenshotUrl:value}))} />
         <label className="wide">Notes<textarea value={trade.notes || ''} onChange={e=>setTrade({...trade,notes:e.target.value})}/></label>
       </div>
     </form>
@@ -531,9 +534,10 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   const [editTrade, setEditTrade] = useState(null);
   const fields = [['symbol','Symbol'], ['entry','Entry'], ['sl','SL'], ['tp','TP'], ['risk','Risk %'], ['lot','Lot Size'], ['pnl','PnL override']];
   const startEdit = (trade) => { setDetailTrade(null); setSetupTrade(null); setEditTrade({ ...trade }); };
-  const replaceSetup = (trade, screenshot) => {
+  const replaceSetup = async (trade, screenshot) => {
     const updated = { ...trade, screenshot, screenshotUrl: '' };
-    saveTradeScreenshot(updated.id, screenshot).catch(() => alert('The screenshot could not be stored.'));
+    try { await saveTradeScreenshot(updated.id, screenshot); }
+    catch { alert('The screenshot could not be stored.'); }
     setTrades(current => current.map(item => item.id === updated.id ? updated : item));
     setSetupTrade(updated);
     setDetailTrade(current => current?.id === updated.id ? updated : current);
@@ -546,13 +550,17 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
     setSetupTrade(null);
     setDetailTrade(current => current?.id === updated.id ? updated : current);
   };
-  const saveEdit = (e) => {
+  const saveEdit = async (e) => {
     e.preventDefault();
     const values = calculateTradeValues(editTrade);
     const updated = { ...editTrade, ...values };
-    if (updated.screenshot) saveTradeScreenshot(updated.id, updated.screenshot).catch(() => alert('The changes were saved, but the screenshot could not be stored.'));
-    else removeTradeScreenshot(updated.id).catch(() => {});
-    setTrades(trades.map(t => t.id === updated.id ? updated : t));
+    // Await the IndexedDB write so the image is committed before we close the
+    // modal / re-render, otherwise a quick refresh could miss it.
+    try {
+      if (updated.screenshot) await saveTradeScreenshot(updated.id, updated.screenshot);
+      else await removeTradeScreenshot(updated.id);
+    } catch { alert('The changes were saved, but the screenshot could not be stored.'); }
+    setTrades(current => current.map(t => t.id === updated.id ? updated : t));
     setEditTrade(null);
   };
 
@@ -565,7 +573,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label>Setup<select value={form.setup} onChange={e=>setForm({...form,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
       {fields.map(([k,l])=><label key={k}>{l}<input value={form[k] || ''} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}
       <label>Confidence<input type="range" min="1" max="10" value={form.confidence} onChange={e=>setForm({...form,confidence:e.target.value})}/></label>
-      <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value=>setForm({...form,screenshot:value})} onUrlChange={value=>setForm({...form,screenshotUrl:value})} />
+      <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value=>setForm(f=>({...f,screenshot:value}))} onUrlChange={value=>setForm(f=>({...f,screenshotUrl:value}))} />
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
     </form>
@@ -577,7 +585,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
         {(t.screenshot || t.screenshotUrl) && <button className="iconAction setupAction iconOnly" type="button" onClick={()=>setSetupTrade(t)} title="View setup" aria-label="View saved setup"><ImageIcon size={17}/></button>}
         <button className="iconAction viewAction iconOnly" type="button" onClick={()=>setDetailTrade(t)} title="View details" aria-label="View trade details"><Eye size={17}/></button>
         <button className="iconAction editAction iconOnly" type="button" onClick={()=>startEdit(t)} title="Edit trade" aria-label="Edit trade"><Pencil size={17}/></button>
-        <button className="iconAction deleteAction" type="button" onClick={()=>{ removeTradeScreenshot(t.id).catch(() => {}); setTrades(trades.filter(x=>x.id!==t.id)); }} title="Delete trade"><Trash2 size={16}/></button>
+        <button className="iconAction deleteAction" type="button" onClick={()=>{ removeTradeScreenshot(t.id).catch(() => {}); setTrades(current=>current.filter(x=>x.id!==t.id)); }} title="Delete trade"><Trash2 size={16}/></button>
       </div>
     </div>)}</div>
     <TradeDetailsModal trade={detailTrade} onClose={() => setDetailTrade(null)} onEdit={startEdit} onViewSetup={(trade) => { setDetailTrade(null); setSetupTrade(trade); }} />
