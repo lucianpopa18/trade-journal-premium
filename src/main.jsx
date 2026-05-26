@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink } from 'lucide-react';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, addMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import './styles.css';
 
 const starterTrades = [
@@ -21,6 +21,14 @@ const nav = [
 
 function money(n) { return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`; }
 function pct(n) { return `${n.toFixed(1)}%`; }
+
+// Generate a collision-proof id. Date.now() alone can repeat when two trades
+// are added in the same millisecond (or when importing a backup), which made
+// screenshots key-collide in IndexedDB. randomUUID avoids that entirely.
+function makeId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // Screenshot images are stored in IndexedDB rather than localStorage.
 // This keeps larger chart images reliable on iPhone/PWA installs.
@@ -88,6 +96,11 @@ function App() {
   }, []);
   const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '' });
 
+  // Until screenshots are hydrated from IndexedDB we must NOT write trades back
+  // to localStorage, otherwise we could persist a half-loaded state. This ref
+  // gates the save effect so hydration always wins the startup race.
+  const hydrated = useRef(false);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -97,11 +110,14 @@ function App() {
         const loaded = await Promise.all(trades.map(async trade => ({ ...trade, screenshot: trade.screenshot || await getTradeScreenshot(trade.id) })));
         if (mounted) setTrades(loaded);
       } catch (error) { console.warn('Could not load saved setup screenshots.', error); }
+      finally { if (mounted) hydrated.current = true; }
     })();
     return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
+    // Skip the very first writes until hydration has populated screenshots.
+    if (!hydrated.current) return;
     try { localStorage.setItem('skrtzTrades', JSON.stringify(persistableTrades(trades))); }
     catch (error) { console.warn('Could not save trade metadata.', error); }
   }, [trades]);
@@ -123,14 +139,17 @@ function App() {
 
   const grouped = (key) => Object.values(trades.reduce((a,t)=>{ const k=t[key] || 'Other'; a[k] ||= { name:k, pnl:0, trades:0 }; a[k].pnl += Number(t.pnl||0); a[k].trades++; return a;},{}));
 
-  function addTrade(e) {
+  async function addTrade(e) {
     e.preventDefault();
-    const rr = form.entry && form.sl && form.tp ? Math.abs((Number(form.tp)-Number(form.entry))/(Number(form.entry)-Number(form.sl))) : 0;
-    const signed = form.direction === 'Long' ? 1 : -1;
-    const raw = form.entry && form.tp ? (Number(form.tp)-Number(form.entry)) * signed : 0;
-    const pnl = form.pnl !== undefined && form.pnl !== '' ? Number(form.pnl) : Math.round(raw * 100 * Number(form.lot || 1));
-    const newTrade = { ...form, id: Date.now(), rr: Number(rr.toFixed(2)), pnl };
-    if (newTrade.screenshot) saveTradeScreenshot(newTrade.id, newTrade.screenshot).catch(() => alert('The trade was saved, but the screenshot could not be stored.'));
+    const { rr, pnl } = calculateTradeValues(form);
+    const newTrade = { ...form, id: makeId(), rr, pnl };
+    // Persist the screenshot BEFORE adding the trade to state. Awaiting the
+    // IndexedDB write guarantees the image is committed, so a quick refresh
+    // can't read an empty store and lose the picture.
+    if (newTrade.screenshot) {
+      try { await saveTradeScreenshot(newTrade.id, newTrade.screenshot); }
+      catch { alert('The trade was saved, but the screenshot could not be stored.'); }
+    }
     setTrades([newTrade, ...trades]);
     setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '' });
   }
@@ -376,11 +395,19 @@ function ScreenshotPicker({ value, urlValue = '', onChange, onUrlChange, label =
 }
 
 function calculateTradeValues(data) {
-  const rr = data.entry && data.sl && data.tp ? Math.abs((Number(data.tp)-Number(data.entry))/(Number(data.entry)-Number(data.sl))) : Number(data.rr || 0);
+  // Risk = distance from entry to stop. If it's zero (entry == SL) or the
+  // inputs aren't all present, RR is undefined — fall back to any provided rr
+  // instead of producing Infinity/NaN, which used to get saved onto the trade.
+  const entry = Number(data.entry), sl = Number(data.sl), tp = Number(data.tp);
+  const risk = entry - sl;
+  const rr = data.entry && data.sl && data.tp && risk !== 0
+    ? Math.abs((tp - entry) / risk)
+    : Number(data.rr || 0);
+  const safeRr = Number.isFinite(rr) ? rr : 0;
   const signed = data.direction === 'Long' ? 1 : -1;
-  const raw = data.entry && data.tp ? (Number(data.tp)-Number(data.entry)) * signed : 0;
+  const raw = data.entry && data.tp ? (tp - entry) * signed : 0;
   const pnl = data.pnl !== undefined && data.pnl !== '' ? Number(data.pnl) : Math.round(raw * 100 * Number(data.lot || 1));
-  return { rr: Number((rr || 0).toFixed(2)), pnl };
+  return { rr: Number(safeRr.toFixed(2)), pnl: Number.isFinite(pnl) ? pnl : 0 };
 }
 
 function DetailItem({ label, value, tone }) {
@@ -707,9 +734,23 @@ function Analytics({ trades }) {
 }
 
 function CalendarPage({ trades, stats }) {
-  const days = eachDayOfInterval({ start: startOfMonth(new Date(2026,4,1)), end: endOfMonth(new Date(2026,4,1)) });
+  // Default to the current month and let the user step backward/forward,
+  // instead of being permanently stuck on May 2026 (which hid every trade
+  // logged in any other month).
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
+  const monthStart = startOfMonth(monthAnchor);
+  const days = eachDayOfInterval({ start: monthStart, end: endOfMonth(monthAnchor) });
   const pnlByDate = Object.fromEntries(trades.map(t=>[t.date, (trades.filter(x=>x.date===t.date).reduce((a,x)=>a+Number(x.pnl||0),0))]));
-  return <div className="card calendar"><h3>May 2026 Calendar Heatmap</h3><div className="calendarGrid">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><b key={d}>{d}</b>)}{Array(getDay(days[0])).fill(0).map((_,i)=><span key={'e'+i}/>)}{days.map(d=>{ const key=format(d,'yyyy-MM-dd'); const pnl=pnlByDate[key]||0; return <div className={`day ${pnl>0?'win':pnl<0?'loss':''}`} key={key}><span>{format(d,'d')}</span><strong>{pnl?money(pnl):''}</strong></div>})}</div><div className="summary">Total {money(stats.total)} · Win Rate {pct(stats.winRate)}</div></div>
+  const shiftMonth = (delta) => setMonthAnchor(prev => startOfMonth(delta < 0 ? subMonths(prev, 1) : addMonths(prev, 1)));
+  return <div className="card calendar">
+    <div className="calendarHead">
+      <button type="button" className="calNav" onClick={()=>shiftMonth(-1)} aria-label="Previous month"><ArrowLeft size={18}/></button>
+      <h3>{format(monthStart,'MMMM yyyy')} Calendar Heatmap</h3>
+      <button type="button" className="calNav" onClick={()=>shiftMonth(1)} aria-label="Next month"><ArrowLeft size={18} style={{transform:'rotate(180deg)'}}/></button>
+    </div>
+    <div className="calendarGrid">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><b key={d}>{d}</b>)}{Array(getDay(days[0])).fill(0).map((_,i)=><span key={'e'+i}/>)}{days.map(d=>{ const key=format(d,'yyyy-MM-dd'); const pnl=pnlByDate[key]||0; return <div className={`day ${pnl>0?'win':pnl<0?'loss':''}`} key={key}><span>{format(d,'d')}</span><strong>{pnl?money(pnl):''}</strong></div>})}</div>
+    <div className="summary">Total {money(stats.total)} · Win Rate {pct(stats.winRate)}</div>
+  </div>
 }
 
 function Coach({ trades, stats }) {
@@ -748,12 +789,15 @@ function SettingsPage({ trades, setTrades }) {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result || '{}'));
         const importedTrades = Array.isArray(parsed) ? parsed : parsed.trades;
         if (!Array.isArray(importedTrades)) throw new Error('Invalid backup');
-        Promise.all(importedTrades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot))).catch(() => {});
+        // Wait for screenshots to be committed to IndexedDB before showing the
+        // trades, otherwise a refresh right after import can lose the images.
+        try { await Promise.all(importedTrades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot))); }
+        catch (err) { console.warn('Some imported screenshots could not be stored.', err); }
         setTrades(importedTrades);
         if (parsed.settings) setSettings(prev => ({ ...prev, ...parsed.settings }));
       } catch {

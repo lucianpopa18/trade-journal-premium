@@ -238,3 +238,9 @@ html[data-theme="clean"] body {
 html[data-theme="clean"] .setupViewer{background:linear-gradient(180deg,#fff,#eef4ff);border-color:rgba(37,99,235,.17)}html[data-theme="clean"] .setupCanvas{background:#eaf2ff}html[data-theme="clean"] .viewerAction,html[data-theme="clean"] .viewerClose{color:#18273d;background:#fff}
 @media(max-width:820px){.setupViewerBackdrop{place-items:stretch;padding:0}.setupViewer{width:100%;height:100dvh;border-radius:0;border:0;padding:calc(16px + env(safe-area-inset-top)) 13px calc(14px + env(safe-area-inset-bottom));gap:12px}.setupCanvas{border-radius:19px}.setupViewerFooter{display:grid;grid-template-columns:1fr 1fr}.viewerAction{padding:0 8px;font-size:13px}}
 @media(max-width:430px){.detailSetupPreview img{height:122px}.setupViewerHeader h2{font-size:21px}.setupViewerHeader p{font-size:12px}.setupCanvas{min-height:42vh}.tradingViewSetupCard{padding:20px}.tradingViewSetupCard h3{font-size:18px}.setupViewerFooter{gap:8px}.viewerAction{min-height:44px;border-radius:13px}}
+
+/* Calendar month navigation */
+.calendarHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.calendarHead h3{margin:0;text-align:center;flex:1}
+.calNav{display:grid;place-items:center;width:42px;height:42px;flex:0 0 auto;border:1px solid var(--border);border-radius:13px;background:#111a31;color:#cbd5e1;cursor:pointer}
+.calNav:hover{border-color:#38bdf880;color:var(--text)}
