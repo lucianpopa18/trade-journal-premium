@@ -22,6 +22,61 @@ const nav = [
 function money(n) { return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`; }
 function pct(n) { return `${n.toFixed(1)}%`; }
 
+// Screenshot images are stored in IndexedDB rather than localStorage.
+// This keeps larger chart images reliable on iPhone/PWA installs.
+const mediaDbName = 'skrtzJournalMedia';
+const mediaStoreName = 'screenshots';
+function openMediaDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(mediaDbName, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(mediaStoreName)) request.result.createObjectStore(mediaStoreName);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function saveTradeScreenshot(id, screenshot) {
+  if (!screenshot) return removeTradeScreenshot(id);
+  const db = await openMediaDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(mediaStoreName, 'readwrite');
+    tx.objectStore(mediaStoreName).put(screenshot, String(id));
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+async function getTradeScreenshot(id) {
+  const db = await openMediaDb();
+  const result = await new Promise((resolve, reject) => {
+    const request = db.transaction(mediaStoreName, 'readonly').objectStore(mediaStoreName).get(String(id));
+    request.onsuccess = () => resolve(request.result || ''); request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return result;
+}
+async function removeTradeScreenshot(id) {
+  const db = await openMediaDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(mediaStoreName, 'readwrite');
+    tx.objectStore(mediaStoreName).delete(String(id));
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+async function clearTradeScreenshots() {
+  const db = await openMediaDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(mediaStoreName, 'readwrite');
+    tx.objectStore(mediaStoreName).clear();
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+function persistableTrades(trades) {
+  return trades.map(({ screenshot, ...trade }) => trade);
+}
+
 function App() {
   const [active, setActive] = useState('Dashboard');
   const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('skrtzTrades') || 'null') || starterTrades);
@@ -33,7 +88,23 @@ function App() {
   }, []);
   const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '' });
 
-  useEffect(() => localStorage.setItem('skrtzTrades', JSON.stringify(trades)), [trades]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        // Migrate screenshots saved by older versions, then hydrate stored previews.
+        await Promise.all(trades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot)));
+        const loaded = await Promise.all(trades.map(async trade => ({ ...trade, screenshot: trade.screenshot || await getTradeScreenshot(trade.id) })));
+        if (mounted) setTrades(loaded);
+      } catch (error) { console.warn('Could not load saved setup screenshots.', error); }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('skrtzTrades', JSON.stringify(persistableTrades(trades))); }
+    catch (error) { console.warn('Could not save trade metadata.', error); }
+  }, [trades]);
 
   const stats = useMemo(() => {
     const total = trades.reduce((a, t) => a + Number(t.pnl || 0), 0);
@@ -58,7 +129,9 @@ function App() {
     const signed = form.direction === 'Long' ? 1 : -1;
     const raw = form.entry && form.tp ? (Number(form.tp)-Number(form.entry)) * signed : 0;
     const pnl = form.pnl !== undefined && form.pnl !== '' ? Number(form.pnl) : Math.round(raw * 100 * Number(form.lot || 1));
-    setTrades([{ ...form, id: Date.now(), rr: Number(rr.toFixed(2)), pnl }, ...trades]);
+    const newTrade = { ...form, id: Date.now(), rr: Number(rr.toFixed(2)), pnl };
+    if (newTrade.screenshot) saveTradeScreenshot(newTrade.id, newTrade.screenshot).catch(() => alert('The trade was saved, but the screenshot could not be stored.'));
+    setTrades([newTrade, ...trades]);
     setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '' });
   }
 
@@ -196,12 +269,28 @@ function fileToDataUrl(file, callback) {
     alert('Please upload an image screenshot.');
     return;
   }
-  if (file.size > 4 * 1024 * 1024) {
-    alert('Screenshot is too large. Please use an image under 4MB.');
+  if (file.size > 20 * 1024 * 1024) {
+    alert('Screenshot is too large. Please use an image under 20MB.');
     return;
   }
   const reader = new FileReader();
-  reader.onload = () => callback(String(reader.result || ''));
+  reader.onload = () => {
+    const original = String(reader.result || '');
+    const img = new Image();
+    img.onload = () => {
+      const maxDimension = 1700;
+      const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return callback(original);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      callback(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => callback(original);
+    img.src = original;
+  };
   reader.readAsDataURL(file);
 }
 
@@ -235,6 +324,7 @@ function ScreenshotPicker({ value, urlValue = '', onChange, onUrlChange, label =
       {activeSrc ? <SetupPreview src={activeSrc} /> : <div><ImagePlus size={26}/><b>Upload chart image</b><small>or paste a TradingView snapshot link below</small></div>}
       <input type="file" accept="image/*" onChange={e => fileToDataUrl(e.target.files?.[0], image => { onChange(image); onUrlChange(''); })} />
     </label>
+    {value && !pastedUrl && <div className="imageReady"><BadgeCheck size={15}/><span>Screenshot ready — save the trade to keep it.</span></div>}
     <div className="urlShotField">
       <Link2 size={17}/>
       <input
@@ -333,6 +423,8 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
     e.preventDefault();
     const values = calculateTradeValues(editTrade);
     const updated = { ...editTrade, ...values };
+    if (updated.screenshot) saveTradeScreenshot(updated.id, updated.screenshot).catch(() => alert('The changes were saved, but the screenshot could not be stored.'));
+    else removeTradeScreenshot(updated.id).catch(() => {});
     setTrades(trades.map(t => t.id === updated.id ? updated : t));
     setEditTrade(null);
   };
@@ -350,13 +442,14 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
     </form>
-    <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className="tradeRow enhancedTradeRow" key={t.id}>
+    <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className={`tradeRow enhancedTradeRow ${(t.screenshot || t.screenshotUrl) ? 'hasThumb' : ''}`} key={t.id}>
       <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}{(t.screenshot || t.screenshotUrl) && <ImageIcon className="rowShotIcon" size={14}/>}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
+      {(t.screenshot || t.screenshotUrl) && <button className="tradeThumb" type="button" onClick={()=>setDetailTrade(t)} aria-label="View saved setup screenshot"><SetupPreview src={t.screenshotUrl || t.screenshot} alt="Saved setup thumbnail" /></button>}
       <span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span>
       <div className="tradeActions">
         <button className="iconAction viewAction iconOnly" type="button" onClick={()=>setDetailTrade(t)} title="View details" aria-label="View trade details"><Eye size={17}/></button>
         <button className="iconAction editAction iconOnly" type="button" onClick={()=>startEdit(t)} title="Edit trade" aria-label="Edit trade"><Pencil size={17}/></button>
-        <button className="iconAction deleteAction" type="button" onClick={()=>setTrades(trades.filter(x=>x.id!==t.id))} title="Delete trade"><Trash2 size={16}/></button>
+        <button className="iconAction deleteAction" type="button" onClick={()=>{ removeTradeScreenshot(t.id).catch(() => {}); setTrades(trades.filter(x=>x.id!==t.id)); }} title="Delete trade"><Trash2 size={16}/></button>
       </div>
     </div>)}</div>
     <TradeDetailsModal trade={detailTrade} onClose={() => setDetailTrade(null)} onEdit={startEdit} />
@@ -558,6 +651,7 @@ function SettingsPage({ trades, setTrades }) {
         const parsed = JSON.parse(String(reader.result || '{}'));
         const importedTrades = Array.isArray(parsed) ? parsed : parsed.trades;
         if (!Array.isArray(importedTrades)) throw new Error('Invalid backup');
+        Promise.all(importedTrades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot))).catch(() => {});
         setTrades(importedTrades);
         if (parsed.settings) setSettings(prev => ({ ...prev, ...parsed.settings }));
       } catch {
@@ -569,11 +663,11 @@ function SettingsPage({ trades, setTrades }) {
   };
 
   const clearJournal = () => {
-    if (confirm('Delete all trades from this device?')) setTrades([]);
+    if (confirm('Delete all trades from this device?')) { clearTradeScreenshots().catch(() => {}); setTrades([]); }
   };
 
   const restoreDemo = () => {
-    if (confirm('Restore the starter demo trades?')) setTrades(starterTrades);
+    if (confirm('Restore the starter demo trades?')) { clearTradeScreenshots().catch(() => {}); setTrades(starterTrades); }
   };
 
   return <section className="grid settingsGrid">

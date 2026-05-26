@@ -195,3 +195,19 @@ html[data-theme="clean"] body {
 .imageFallback{min-height:190px;display:grid!important;place-items:center;align-content:center;gap:8px;color:#94a3b8;background:radial-gradient(circle at center,rgba(34,211,238,.08),transparent 52%);text-align:center}.imageFallback b{color:var(--text)}.imageFallback small{padding:0 22px}
 .tradeScreenshotWrap{margin-bottom:16px}.tradeScreenshotWrap .tradeScreenshot{margin-bottom:10px}.openSetupLink{justify-content:flex-end;font-size:13px;padding-right:4px}
 @media(max-width:430px){.urlShotField{height:46px;border-radius:13px}.imageFallback{min-height:165px}.openSetupLink{font-size:12px}}
+
+
+/* v18: reliable setup storage + visible thumbnails in Trade History */
+.imageReady{display:flex;align-items:center;gap:7px;color:#5eead4;font-size:12px;font-weight:850;padding:1px 3px}
+.imageReady svg{color:#34d399;filter:drop-shadow(0 0 7px rgba(52,211,153,.38))}
+.tradeThumb{width:56px!important;height:44px!important;min-width:56px!important;padding:0!important;overflow:hidden;border-radius:12px!important;border:1px solid rgba(34,211,238,.26)!important;background:#050a16!important;box-shadow:0 0 18px rgba(34,211,238,.08)}
+.tradeThumb img{display:block;width:100%;height:100%;object-fit:cover}
+.tradeThumb .imageFallback{min-height:0!important;height:100%;padding:0!important}
+.tradeThumb .imageFallback b,.tradeThumb .imageFallback small{display:none}
+.tradeThumb .imageFallback svg{width:17px;height:17px}
+.enhancedTradeRow.hasThumb{grid-template-columns:minmax(0,1fr) 56px auto auto;grid-template-areas:'main thumb pnl actions'}
+.enhancedTradeRow .tradeThumb{grid-area:thumb}
+@media(max-width:430px){
+  .enhancedTradeRow.hasThumb{grid-template-columns:56px minmax(0,1fr) auto!important;grid-template-areas:'thumb main pnl' 'actions actions actions'!important;align-items:center}
+  .tradeThumb{height:48px!important}
+}
