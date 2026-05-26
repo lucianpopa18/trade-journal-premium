@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink } from 'lucide-react';
@@ -263,9 +263,10 @@ function Dashboard({ stats, equity, grouped }) {
 }
 
 
-function fileToDataUrl(file, callback) {
+function fileToDataUrl(file, callback, onStatus) {
   if (!file) return;
-  if (!file.type?.startsWith('image/')) {
+  const looksLikeImage = file.type?.startsWith('image/') || /\.(png|jpe?g|webp|gif|heic|heif)$/i.test(file.name || '');
+  if (!looksLikeImage) {
     alert('Please upload an image screenshot.');
     return;
   }
@@ -273,22 +274,45 @@ function fileToDataUrl(file, callback) {
     alert('Screenshot is too large. Please use an image under 20MB.');
     return;
   }
+
+  onStatus?.('Loading screenshot…');
   const reader = new FileReader();
+  reader.onerror = () => {
+    onStatus?.('Could not read this image. Try another screenshot.');
+    alert('Could not read this image. Try another screenshot.');
+  };
   reader.onload = () => {
     const original = String(reader.result || '');
+    if (!original) {
+      onStatus?.('Could not read this image.');
+      return;
+    }
+
+    // Show the selected image immediately. Compression can finish a moment later.
+    callback(original);
+    onStatus?.('Screenshot selected — save the trade to keep it.');
+
     const img = new Image();
     img.onload = () => {
-      const maxDimension = 1700;
-      const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(img.width * scale));
-      canvas.height = Math.max(1, Math.round(img.height * scale));
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return callback(original);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      callback(canvas.toDataURL('image/jpeg', 0.82));
+      try {
+        const maxDimension = 1700;
+        const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.82);
+        if (compressed?.startsWith('data:image/')) callback(compressed);
+      } catch (error) {
+        console.warn('Screenshot compression skipped.', error);
+      }
     };
-    img.onerror = () => callback(original);
+    img.onerror = () => {
+      // Some iPhone images/HEIC files cannot be canvas-compressed. Keep original.
+      console.warn('Screenshot preview kept without compression.');
+    };
     img.src = original;
   };
   reader.readAsDataURL(file);
@@ -311,20 +335,30 @@ function SetupPreview({ src, alt = 'Trade setup screenshot preview', className =
 }
 
 function ScreenshotPicker({ value, urlValue = '', onChange, onUrlChange, label = 'Setup Screenshot' }) {
+  const [status, setStatus] = useState('');
+  const inputRef = useRef(null);
   const pastedUrl = urlValue?.trim() || '';
   const activeSrc = pastedUrl || value;
   const isTvLink = /(?:www\.)?tradingview\.com\/x\//i.test(pastedUrl);
-  const clearMedia = () => { onChange(''); onUrlChange(''); };
+  const clearMedia = () => { onChange(''); onUrlChange(''); setStatus(''); if (inputRef.current) inputRef.current.value = ''; };
+  const handleFile = (event) => {
+    const file = event.target.files?.[0];
+    fileToDataUrl(file, image => { onChange(image); onUrlChange(''); }, setStatus);
+    // allow choosing the same screenshot again later
+    event.target.value = '';
+  };
   return <div className="screenshotPicker wide">
     <div className="screenshotPickerTop">
       <span>{label}</span>
       {activeSrc && <button type="button" onClick={clearMedia}>Remove</button>}
     </div>
     <label className={`screenshotDrop ${activeSrc ? 'hasImage' : ''}`}>
-      {activeSrc ? <SetupPreview src={activeSrc} /> : <div><ImagePlus size={26}/><b>Upload chart image</b><small>or paste a TradingView snapshot link below</small></div>}
-      <input type="file" accept="image/*" onChange={e => fileToDataUrl(e.target.files?.[0], image => { onChange(image); onUrlChange(''); })} />
+      {activeSrc ? <SetupPreview src={activeSrc} /> : <div><ImagePlus size={26}/><b>Upload chart image</b><small>tap here to choose from your phone</small></div>}
+      <input ref={inputRef} type="file" accept="image/*,.heic,.heif" onChange={handleFile} />
     </label>
-    {value && !pastedUrl && <div className="imageReady"><BadgeCheck size={15}/><span>Screenshot ready — save the trade to keep it.</span></div>}
+    <button className="chooseImageBtn" type="button" onClick={() => inputRef.current?.click()}><ImagePlus size={17}/> Choose image from phone</button>
+    {(value && !pastedUrl) && <div className="imageReady"><BadgeCheck size={15}/><span>{status || 'Screenshot ready — save the trade to keep it.'}</span></div>}
+    {status && !value && <div className="imageReady pending"><span>{status}</span></div>}
     <div className="urlShotField">
       <Link2 size={17}/>
       <input
