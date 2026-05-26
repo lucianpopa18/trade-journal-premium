@@ -338,7 +338,7 @@ function ScreenshotPicker({ value, urlValue = '', onChange, onUrlChange, label =
   const [status, setStatus] = useState('');
   const inputRef = useRef(null);
   const pastedUrl = urlValue?.trim() || '';
-  const activeSrc = pastedUrl || value;
+  const activeSrc = value || pastedUrl;
   const isTvLink = /(?:www\.)?tradingview\.com\/x\//i.test(pastedUrl);
   const clearMedia = () => { onChange(''); onUrlChange(''); setStatus(''); if (inputRef.current) inputRef.current.value = ''; };
   const handleFile = (event) => {
@@ -387,12 +387,13 @@ function DetailItem({ label, value, tone }) {
   return <div className="detailItem"><span>{label}</span><b className={tone || ''}>{value || '-'}</b></div>
 }
 
-function TradeDetailsModal({ trade, onClose, onEdit }) {
+function TradeDetailsModal({ trade, onClose, onEdit, onViewSetup }) {
   useEffect(() => {
     if (trade) requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   }, [trade]);
   if (!trade) return null;
   const resultTone = Number(trade.pnl) >= 0 ? 'green' : 'red';
+  const hasSetup = Boolean(trade.screenshot || trade.screenshotUrl);
   return <div className="modalBackdrop" onClick={onClose}>
     <div className="tradeModal" onClick={e => e.stopPropagation()}>
       <div className="modalTop">
@@ -407,7 +408,10 @@ function TradeDetailsModal({ trade, onClose, onEdit }) {
         </div>
         <strong className={resultTone}>{money(Number(trade.pnl || 0))}</strong>
       </div>
-      {(trade.screenshotUrl || trade.screenshot) && <div className="tradeScreenshotWrap"><div className="tradeScreenshot"><SetupPreview src={trade.screenshotUrl || trade.screenshot} alt="Trade setup screenshot" /></div>{trade.screenshotUrl && <a className="openSetupLink" href={trade.screenshotUrl} target="_blank" rel="noreferrer"><ExternalLink size={16}/> Open original setup link</a>}</div>}
+      {hasSetup && <button className="detailSetupPreview" type="button" onClick={() => onViewSetup(trade)}>
+        {trade.screenshot ? <SetupPreview src={trade.screenshot} alt="Saved trade setup" /> : <div className="linkedSetupPreview"><ImageIcon size={22}/><div><b>TradingView setup attached</b><small>Tap to view setup</small></div></div>}
+        <span className="setupOverlay"><ImageIcon size={16}/> View setup</span>
+      </button>}
       <div className="detailGrid">
         <DetailItem label="Entry" value={trade.entry} />
         <DetailItem label="Stop Loss" value={trade.sl} tone="red" />
@@ -423,6 +427,52 @@ function TradeDetailsModal({ trade, onClose, onEdit }) {
         <p>{trade.notes || 'No notes added for this trade.'}</p>
       </div>
     </div>
+  </div>
+}
+
+function SetupViewer({ trade, onClose, onReplace, onRemove, onEdit }) {
+  const inputRef = useRef(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    if (!trade) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = oldOverflow; };
+  }, [trade]);
+  if (!trade) return null;
+  const hasUpload = Boolean(trade.screenshot);
+  const hasLink = Boolean(trade.screenshotUrl);
+  const handleReplacement = (event) => {
+    const file = event.target.files?.[0];
+    fileToDataUrl(file, image => onReplace(trade, image), setStatus);
+    event.target.value = '';
+  };
+  return <div className="setupViewerBackdrop" onClick={onClose}>
+    <section className="setupViewer" onClick={e => e.stopPropagation()} aria-label="Trade setup viewer">
+      <div className="setupViewerHeader">
+        <div>
+          <span className="setupViewerTag">Setup Review</span>
+          <h2>{trade.symbol} · {trade.setup}</h2>
+          <p>{trade.date} · {trade.session} · {trade.direction}</p>
+        </div>
+        <button className="viewerClose" type="button" onClick={onClose} aria-label="Close setup viewer"><X size={21}/></button>
+      </div>
+      <div className="setupCanvas">
+        {hasUpload ? <SetupPreview src={trade.screenshot} alt={`${trade.symbol} saved setup screenshot`} className="setupFullImage" /> : hasLink ? <div className="tradingViewSetupCard">
+          <ImageIcon size={42}/>
+          <h3>TradingView snapshot saved</h3>
+          <p>Open the original chart image to review your marked setup.</p>
+          <a href={trade.screenshotUrl} target="_blank" rel="noreferrer"><ExternalLink size={17}/> Open TradingView snapshot</a>
+        </div> : <div className="noSetup"><ImagePlus size={40}/><b>No setup attached</b></div>}
+      </div>
+      <div className="setupViewerFooter">
+        <label className="viewerAction replaceSetup"><ImagePlus size={17}/> Replace image<input ref={inputRef} type="file" accept="image/*,.heic,.heif" onChange={handleReplacement}/></label>
+        {hasLink && <a className="viewerAction openTv" href={trade.screenshotUrl} target="_blank" rel="noreferrer"><ExternalLink size={17}/> TradingView</a>}
+        <button className="viewerAction" type="button" onClick={() => onEdit(trade)}><Pencil size={17}/> Edit trade</button>
+        <button className="viewerAction removeSetup" type="button" onClick={() => onRemove(trade)}><Trash2 size={17}/> Remove</button>
+      </div>
+      {status && <p className="setupSaveStatus"><BadgeCheck size={15}/> {status}</p>}
+    </section>
   </div>
 }
 
@@ -450,9 +500,25 @@ function EditTradeModal({ trade, setTrade, onSave, onClose }) {
 
 function Trades({ trades, form, setForm, addTrade, setTrades }) {
   const [detailTrade, setDetailTrade] = useState(null);
+  const [setupTrade, setSetupTrade] = useState(null);
   const [editTrade, setEditTrade] = useState(null);
   const fields = [['symbol','Symbol'], ['entry','Entry'], ['sl','SL'], ['tp','TP'], ['risk','Risk %'], ['lot','Lot Size'], ['pnl','PnL override']];
-  const startEdit = (trade) => { setDetailTrade(null); setEditTrade({ ...trade }); };
+  const startEdit = (trade) => { setDetailTrade(null); setSetupTrade(null); setEditTrade({ ...trade }); };
+  const replaceSetup = (trade, screenshot) => {
+    const updated = { ...trade, screenshot, screenshotUrl: '' };
+    saveTradeScreenshot(updated.id, screenshot).catch(() => alert('The screenshot could not be stored.'));
+    setTrades(current => current.map(item => item.id === updated.id ? updated : item));
+    setSetupTrade(updated);
+    setDetailTrade(current => current?.id === updated.id ? updated : current);
+  };
+  const removeSetup = (trade) => {
+    if (!window.confirm('Remove the saved setup from this trade?')) return;
+    const updated = { ...trade, screenshot: '', screenshotUrl: '' };
+    removeTradeScreenshot(updated.id).catch(() => {});
+    setTrades(current => current.map(item => item.id === updated.id ? updated : item));
+    setSetupTrade(null);
+    setDetailTrade(current => current?.id === updated.id ? updated : current);
+  };
   const saveEdit = (e) => {
     e.preventDefault();
     const values = calculateTradeValues(editTrade);
@@ -478,15 +544,17 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
     </form>
     <div className="card table"><div className="sectionHead"><h3>Trade History</h3><span>{trades.length} trades</span></div>{trades.map(t=><div className={`tradeRow enhancedTradeRow ${(t.screenshot || t.screenshotUrl) ? 'hasThumb' : ''}`} key={t.id}>
       <div className="tradeMain" onClick={()=>setDetailTrade(t)}><b>{t.symbol}{(t.screenshot || t.screenshotUrl) && <ImageIcon className="rowShotIcon" size={14}/>}</b><span>{t.date} · {t.session} · {t.setup}</span></div>
-      {(t.screenshot || t.screenshotUrl) && <button className="tradeThumb" type="button" onClick={()=>setDetailTrade(t)} aria-label="View saved setup screenshot"><SetupPreview src={t.screenshotUrl || t.screenshot} alt="Saved setup thumbnail" /></button>}
+      {(t.screenshot || t.screenshotUrl) && <button className="tradeThumb" type="button" onClick={()=>setSetupTrade(t)} aria-label="View saved setup screenshot">{t.screenshot ? <SetupPreview src={t.screenshot} alt="Saved setup thumbnail" /> : <ImageIcon size={19}/>}</button>}
       <span className={t.pnl>=0?'green':'red'}>{money(t.pnl)}</span>
       <div className="tradeActions">
+        {(t.screenshot || t.screenshotUrl) && <button className="iconAction setupAction iconOnly" type="button" onClick={()=>setSetupTrade(t)} title="View setup" aria-label="View saved setup"><ImageIcon size={17}/></button>}
         <button className="iconAction viewAction iconOnly" type="button" onClick={()=>setDetailTrade(t)} title="View details" aria-label="View trade details"><Eye size={17}/></button>
         <button className="iconAction editAction iconOnly" type="button" onClick={()=>startEdit(t)} title="Edit trade" aria-label="Edit trade"><Pencil size={17}/></button>
         <button className="iconAction deleteAction" type="button" onClick={()=>{ removeTradeScreenshot(t.id).catch(() => {}); setTrades(trades.filter(x=>x.id!==t.id)); }} title="Delete trade"><Trash2 size={16}/></button>
       </div>
     </div>)}</div>
-    <TradeDetailsModal trade={detailTrade} onClose={() => setDetailTrade(null)} onEdit={startEdit} />
+    <TradeDetailsModal trade={detailTrade} onClose={() => setDetailTrade(null)} onEdit={startEdit} onViewSetup={(trade) => { setDetailTrade(null); setSetupTrade(trade); }} />
+    <SetupViewer trade={setupTrade} onClose={() => setSetupTrade(null)} onReplace={replaceSetup} onRemove={removeSetup} onEdit={startEdit} />
     <EditTradeModal trade={editTrade} setTrade={setEditTrade} onSave={saveEdit} onClose={() => setEditTrade(null)} />
   </section>
 }
