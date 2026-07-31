@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink } from 'lucide-react';
+import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink, Radar, Clock3, CheckCircle2, Circle, Ban, PlayCircle, Archive, ListChecks } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, addMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
+import { createWatchPlan, isPlanExpired, prepareTradeFromPlan, summarizeWatchlist, WATCHLIST_ACTIVE_STATUSES } from './watchlist.js';
 import './styles.css';
 
 const starterTrades = [
@@ -16,7 +17,7 @@ const starterTrades = [
 ];
 
 const nav = [
-  ['Dashboard', LayoutDashboard], ['Trades', NotebookTabs], ['Analytics', BarChart3], ['Calendar', CalendarDays], ['AI Coach', Brain], ['Goals', Target], ['Settings', Settings]
+  ['Dashboard', LayoutDashboard], ['Trades', NotebookTabs], ['Watchlist', Radar], ['Analytics', BarChart3], ['Calendar', CalendarDays], ['AI Coach', Brain], ['Goals', Target], ['Settings', Settings]
 ];
 
 function money(n) { return `${n >= 0 ? '+' : '-'}$${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`; }
@@ -76,10 +77,23 @@ async function clearTradeScreenshots() {
   const db = await openMediaDb();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(mediaStoreName, 'readwrite');
-    tx.objectStore(mediaStoreName).clear();
+    const request = tx.objectStore(mediaStoreName).openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (!String(cursor.key).startsWith('watch:')) cursor.delete();
+      cursor.continue();
+    };
     tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
   });
   db.close();
+}
+const watchMediaKey = id => `watch:${id}`;
+const saveWatchScreenshot = (id, screenshot) => saveTradeScreenshot(watchMediaKey(id), screenshot);
+const getWatchScreenshot = id => getTradeScreenshot(watchMediaKey(id));
+const removeWatchScreenshot = id => removeTradeScreenshot(watchMediaKey(id));
+function persistablePlans(plans) {
+  return plans.map(({ screenshot, ...plan }) => plan);
 }
 function persistableTrades(trades) {
   return trades.map(({ screenshot, ...trade }) => trade);
@@ -88,13 +102,14 @@ function persistableTrades(trades) {
 function App() {
   const [active, setActive] = useState('Dashboard');
   const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('skrtzTrades') || 'null') || starterTrades);
+  const [watchPlans, setWatchPlans] = useState(() => JSON.parse(localStorage.getItem('skrtzWatchlist') || 'null') || []);
 
   useEffect(() => {
     const savedSettings = JSON.parse(localStorage.getItem('skrtzSettings') || 'null');
     const savedTheme = savedSettings?.theme || 'Dark';
     document.documentElement.setAttribute('data-theme', savedTheme.toLowerCase());
   }, []);
-  const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '' });
+  const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '', sourcePlanId: '' });
 
   // Until screenshots are hydrated from IndexedDB we must NOT write trades back
   // to localStorage, otherwise we could persist a half-loaded state. This ref
@@ -121,6 +136,45 @@ function App() {
     try { localStorage.setItem('skrtzTrades', JSON.stringify(persistableTrades(trades))); }
     catch (error) { console.warn('Could not save trade metadata.', error); }
   }, [trades]);
+
+  const watchHydrated = useRef(false);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        await Promise.all(watchPlans.filter(plan => plan.screenshot).map(plan => saveWatchScreenshot(plan.id, plan.screenshot)));
+        const loaded = await Promise.all(watchPlans.map(async plan => ({
+          ...plan,
+          status: isPlanExpired(plan) ? 'Expired' : plan.status,
+          screenshot: plan.screenshot || await getWatchScreenshot(plan.id),
+        })));
+        if (mounted) setWatchPlans(loaded);
+      } catch (error) { console.warn('Could not load watchlist screenshots.', error); }
+      finally { if (mounted) watchHydrated.current = true; }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!watchHydrated.current) return;
+    try { localStorage.setItem('skrtzWatchlist', JSON.stringify(persistablePlans(watchPlans))); }
+    catch (error) { console.warn('Could not save watchlist.', error); }
+  }, [watchPlans]);
+
+  useEffect(() => {
+    const expirePlans = () => setWatchPlans(current => {
+      let changed = false;
+      const next = current.map(plan => {
+        if (!isPlanExpired(plan)) return plan;
+        changed = true;
+        return { ...plan, status: 'Expired', updatedAt: new Date().toISOString() };
+      });
+      return changed ? next : current;
+    });
+    expirePlans();
+    const timer = window.setInterval(expirePlans, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const stats = useMemo(() => {
     const total = trades.reduce((a, t) => a + Number(t.pnl || 0), 0);
@@ -154,9 +208,21 @@ function App() {
     // stale (hydration could have finished meanwhile). This always prepends to
     // the freshest list so neither the trade nor its screenshot gets dropped.
     setTrades(current => [newTrade, ...current]);
-    setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '' });
+    if (newTrade.sourcePlanId) {
+      setWatchPlans(current => current.map(plan => plan.id === newTrade.sourcePlanId
+        ? { ...plan, status: 'Executed', executedAt: new Date().toISOString(), linkedTradeId: newTrade.id, updatedAt: new Date().toISOString() }
+        : plan));
+    }
+    setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '', sourcePlanId: '' });
   }
 
+  const watchSummary = useMemo(() => summarizeWatchlist(watchPlans), [watchPlans]);
+  const executeWatchPlan = (plan) => {
+    setForm(current => ({ ...current, ...prepareTradeFromPlan(plan, format(new Date(), 'yyyy-MM-dd')) }));
+    setActive('Trades');
+    setMenuOpen(false);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
   const pageProps = { trades, stats, equity, grouped, form, setForm, addTrade, setTrades };
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -176,15 +242,16 @@ function App() {
         <div className="pageTitle"><h1>{active}</h1><p>Track your trades. Master your discipline.</p></div>
         <button className="primary addDesktop" onClick={()=>go('Trades')}><Plus size={18}/> Add Trade</button>
       </header>
-      {active === 'Dashboard' && <Dashboard {...pageProps}/>} 
-      {active === 'Trades' && <Trades {...pageProps}/>} 
-      {active === 'Analytics' && <Analytics {...pageProps}/>} 
-      {active === 'Calendar' && <CalendarPage trades={trades} stats={stats}/>} 
-      {active === 'AI Coach' && <Coach trades={trades} stats={stats}/>} 
-      {active === 'Goals' && <Goals stats={stats}/>} 
-      {active === 'Settings' && <SettingsPage trades={trades} setTrades={setTrades}/>} 
+      {active === 'Dashboard' && <Dashboard {...pageProps} watchSummary={watchSummary} onOpenWatchlist={() => go('Watchlist')}/>}
+      {active === 'Trades' && <Trades {...pageProps}/>}
+      {active === 'Watchlist' && <WatchlistPage plans={watchPlans} setPlans={setWatchPlans} onExecute={executeWatchPlan}/>}
+      {active === 'Analytics' && <Analytics {...pageProps}/>}
+      {active === 'Calendar' && <CalendarPage trades={trades} stats={stats}/>}
+      {active === 'AI Coach' && <Coach trades={trades} stats={stats}/>}
+      {active === 'Goals' && <Goals stats={stats}/>}
+      {active === 'Settings' && <SettingsPage trades={trades} setTrades={setTrades} watchPlans={watchPlans} setWatchPlans={setWatchPlans}/>}
     </main>
-    <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>
+    {active !== 'Watchlist' && <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>}
     <nav className="bottomNav" aria-label="Mobile navigation">{nav.slice(0,5).map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={19}/><span>{name === 'Dashboard' ? 'Home' : name.replace('AI Coach','Coach')}</span></button>)}</nav>
   </div>
 }
@@ -233,7 +300,7 @@ function SessionTooltip({ active, payload, label }) {
   </div>
 }
 
-function Dashboard({ stats, equity, grouped }) {
+function Dashboard({ stats, equity, grouped, watchSummary, onOpenWatchlist }) {
   const sessionData = grouped('session').map((item, index) => ({
     ...item,
     fill: item.pnl >= 0 ? `url(#sessionWin${index})` : `url(#sessionLoss${index})`,
@@ -248,6 +315,11 @@ function Dashboard({ stats, equity, grouped }) {
       <Stat label="Trades" value={stats.count} sub="logged trades" icon="＋" />
     </div></section>
     <section className="grid dash">
+      <button className="card watchDashboardCard" type="button" onClick={onOpenWatchlist}>
+        <div className="watchDashIcon"><Radar size={24}/></div>
+        <div><span>Trade Plan Watchlist</span><strong>{watchSummary.active} active · {watchSummary.ready} ready</strong><small>{watchSummary.expiringToday ? `${watchSummary.expiringToday} expiring today` : 'Plan first. Execute with discipline.'}</small></div>
+        <ArrowLeft className="watchDashArrow" size={19}/>
+      </button>
       <div className="card big"><h3>Equity Curve</h3><ResponsiveContainer height={280}><AreaChart data={equity}><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2f7bff" stopOpacity={0.7}/><stop offset="95%" stopColor="#2f7bff" stopOpacity={0}/></linearGradient></defs><XAxis dataKey="date"/><YAxis/><Tooltip/><Area type="monotone" dataKey="equity" stroke="#38bdf8" fill="url(#g)" strokeWidth={3}/></AreaChart></ResponsiveContainer></div>
       <div className="card sessionCard">
         <div className="chartHeader">
@@ -565,6 +637,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   };
 
   return <section className="grid tradesPage">
+    {form.sourcePlanId && <div className="card executionBanner"><PlayCircle size={21}/><div><b>Trade plan loaded</b><span>Review the planned levels, enter the actual execution details, then save. The watchlist plan becomes Executed only after this trade is saved.</span></div><button type="button" onClick={() => setForm(current => ({ ...current, sourcePlanId: '' }))}><X size={16}/> Unlink</button></div>}
     <form className="card form" onSubmit={addTrade}><h3>New Trade</h3>
       <div className="formgrid"><label>Date<input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></label>
       <label>Direction<select value={form.direction} onChange={e=>setForm({...form,direction:e.target.value})}><option>Long</option><option>Short</option></select></label>
@@ -592,6 +665,121 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
     <SetupViewer trade={setupTrade} onClose={() => setSetupTrade(null)} onReplace={replaceSetup} onRemove={removeSetup} onEdit={startEdit} />
     <EditTradeModal trade={editTrade} setTrade={setEditTrade} onSave={saveEdit} onClose={() => setEditTrade(null)} />
   </section>
+}
+
+const watchChecklistItems = [
+  ['trend', 'Trend aligned'],
+  ['liquidity', 'Liquidity taken'],
+  ['confirmation', 'Entry confirmation'],
+  ['news', 'No high-impact news'],
+  ['risk', 'Risk within limit'],
+  ['session', 'Session valid'],
+  ['rr', 'Minimum RR reached'],
+];
+
+const emptyWatchForm = () => ({
+  symbol: 'XAUUSD', direction: 'Long', timeframe: 'M15', session: 'London', setup: 'Breaker + FVG',
+  entryFrom: '', entryTo: '', sl: '', tp: '', risk: 1, confidence: 7, confirmation: '', invalidation: '',
+  expiresAt: '', screenshot: '', screenshotUrl: '', notes: '', checklist: {}, status: 'Watching',
+});
+
+function WatchlistPage({ plans, setPlans, onExecute }) {
+  const [form, setForm] = useState(emptyWatchForm);
+  const [editingId, setEditingId] = useState('');
+  const [view, setView] = useState('Active');
+  const summary = useMemo(() => summarizeWatchlist(plans), [plans]);
+  const visiblePlans = plans
+    .filter(plan => view === 'Active' ? WATCHLIST_ACTIVE_STATUSES.includes(plan.status) : !WATCHLIST_ACTIVE_STATUSES.includes(plan.status))
+    .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+
+  const resetForm = () => { setForm(emptyWatchForm()); setEditingId(''); };
+  const savePlan = async event => {
+    event.preventDefault();
+    const existing = plans.find(plan => plan.id === editingId);
+    const id = existing?.id || makeId();
+    const normalized = createWatchPlan(form, id, existing?.createdAt || new Date().toISOString());
+    const plan = { ...existing, ...normalized, status: existing?.status || form.status || 'Watching', updatedAt: new Date().toISOString() };
+    try { await saveWatchScreenshot(id, plan.screenshot); }
+    catch { alert('The plan was saved, but its screenshot could not be stored.'); }
+    setPlans(current => existing ? current.map(item => item.id === id ? plan : item) : [plan, ...current]);
+    resetForm();
+    setView(WATCHLIST_ACTIVE_STATUSES.includes(plan.status) ? 'Active' : 'History');
+  };
+  const editPlan = plan => {
+    setForm({ ...emptyWatchForm(), ...plan, checklist: { ...(plan.checklist || {}) } });
+    setEditingId(plan.id);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  };
+  const updateStatus = (plan, status) => {
+    setPlans(current => current.map(item => item.id === plan.id ? { ...item, status, updatedAt: new Date().toISOString() } : item));
+  };
+  const deletePlan = plan => {
+    if (!confirm(`Delete ${plan.symbol} from the watchlist?`)) return;
+    removeWatchScreenshot(plan.id).catch(() => {});
+    setPlans(current => current.filter(item => item.id !== plan.id));
+  };
+  const toggleCheck = key => setForm(current => ({ ...current, checklist: { ...current.checklist, [key]: !current.checklist?.[key] } }));
+  const formatDeadline = value => {
+    if (!value) return 'No expiry';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'No expiry' : format(date, 'MMM d · HH:mm');
+  };
+
+  return <section className="watchlistPage">
+    <div className="watchHero card">
+      <div><span className="watchEyebrow"><Radar size={15}/> PRE-TRADE COMMAND CENTER</span><h2>Plan the trade before the market tests you.</h2><p>Track the idea, confirm the setup, then move it into your journal with one action.</p></div>
+      <div className="watchHeroStats"><span><b>{summary.active}</b><small>Active</small></span><span><b>{summary.ready}</b><small>Ready</small></span><span><b>{summary.conversionRate}%</b><small>Converted</small></span></div>
+    </div>
+
+    <div className="watchLayout">
+      <form className="card watchForm" onSubmit={savePlan}>
+        <div className="watchSectionHead"><div><span>{editingId ? 'EDIT PLAN' : 'NEW OPPORTUNITY'}</span><h3>{editingId ? 'Refine trade plan' : 'Create trade plan'}</h3></div>{editingId && <button type="button" className="watchCancel" onClick={resetForm}><X size={16}/> Cancel</button>}</div>
+        <div className="formgrid watchFields">
+          <label>Symbol<input required value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value.toUpperCase() })}/></label>
+          <label>Direction<select value={form.direction} onChange={e => setForm({ ...form, direction: e.target.value })}><option>Long</option><option>Short</option></select></label>
+          <label>Timeframe<select value={form.timeframe} onChange={e => setForm({ ...form, timeframe: e.target.value })}>{['M1','M5','M15','M30','H1','H4','D1'].map(x => <option key={x}>{x}</option>)}</select></label>
+          <label>Session<select value={form.session} onChange={e => setForm({ ...form, session: e.target.value })}><option>London</option><option>NY</option><option>Asia</option><option>Swing</option></select></label>
+          <label className="wide">Setup<select value={form.setup} onChange={e => setForm({ ...form, setup: e.target.value })}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option><option>Custom Setup</option></select></label>
+          <label>Entry From<input required type="number" inputMode="decimal" step="any" value={form.entryFrom} onChange={e => setForm({ ...form, entryFrom: e.target.value })}/></label>
+          <label>Entry To<input type="number" inputMode="decimal" step="any" placeholder="same as From" value={form.entryTo} onChange={e => setForm({ ...form, entryTo: e.target.value })}/></label>
+          <label>Stop Loss<input required type="number" inputMode="decimal" step="any" value={form.sl} onChange={e => setForm({ ...form, sl: e.target.value })}/></label>
+          <label>Take Profit<input required type="number" inputMode="decimal" step="any" value={form.tp} onChange={e => setForm({ ...form, tp: e.target.value })}/></label>
+          <label>Risk %<input type="number" inputMode="decimal" min="0" step="0.1" value={form.risk} onChange={e => setForm({ ...form, risk: e.target.value })}/></label>
+          <label>Expires<input type="datetime-local" value={form.expiresAt} onChange={e => setForm({ ...form, expiresAt: e.target.value })}/></label>
+          <label className="wide">Confirmation trigger<input placeholder="What must happen before entry?" value={form.confirmation} onChange={e => setForm({ ...form, confirmation: e.target.value })}/></label>
+          <label className="wide">Invalidation condition<input placeholder="What makes this idea invalid?" value={form.invalidation} onChange={e => setForm({ ...form, invalidation: e.target.value })}/></label>
+          <label className="wide">Confidence · {form.confidence}/10<input type="range" min="1" max="10" value={form.confidence} onChange={e => setForm({ ...form, confidence: e.target.value })}/></label>
+          <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value => setForm(current => ({ ...current, screenshot: value }))} onUrlChange={value => setForm(current => ({ ...current, screenshotUrl: value }))} label="Chart setup" />
+          <label className="wide">Plan notes<textarea placeholder="Context, levels, news, what you are waiting for…" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}/></label>
+        </div>
+        <div className="planChecklist"><div><ListChecks size={18}/><span>Pre-trade checklist</span><b>{Object.values(form.checklist || {}).filter(Boolean).length}/{watchChecklistItems.length}</b></div><div className="checkGrid">{watchChecklistItems.map(([key, label]) => <button type="button" key={key} className={form.checklist?.[key] ? 'checked' : ''} onClick={() => toggleCheck(key)}>{form.checklist?.[key] ? <CheckCircle2 size={17}/> : <Circle size={17}/>} {label}</button>)}</div></div>
+        <div className="watchFormFooter"><div><span>Estimated RR</span><strong>{createWatchPlan(form, 'preview').rr.toFixed(2)}R</strong></div><button className="primary" type="submit"><Save size={17}/>{editingId ? 'Update Plan' : 'Save to Watchlist'}</button></div>
+      </form>
+
+      <div className="watchBoard">
+        <div className="watchTabs"><button className={view === 'Active' ? 'active' : ''} onClick={() => setView('Active')}>Active Plans <b>{summary.active}</b></button><button className={view === 'History' ? 'active' : ''} onClick={() => setView('History')}>History <b>{summary.closed}</b></button></div>
+        {!visiblePlans.length && <div className="card emptyWatch"><Radar size={34}/><h3>{view === 'Active' ? 'No active plans yet' : 'No closed plans yet'}</h3><p>{view === 'Active' ? 'Build your first opportunity on the left.' : 'Executed, skipped and invalidated plans will live here.'}</p></div>}
+        <div className="watchCards">{visiblePlans.map(plan => {
+          const checked = Object.values(plan.checklist || {}).filter(Boolean).length;
+          return <article className={`card watchPlan status${plan.status}`} key={plan.id}>
+            <div className="planTop"><div className={`directionBadge ${plan.direction.toLowerCase()}`}>{plan.direction}</div><span className="planStatus">{plan.status}</span><button className="planMore" onClick={() => editPlan(plan)} aria-label="Edit plan"><Pencil size={16}/></button></div>
+            <div className="planIdentity"><div><h3>{plan.symbol}</h3><p>{plan.timeframe} · {plan.session} · {plan.setup}</p></div><strong>{Number(plan.rr || 0).toFixed(2)}R</strong></div>
+            {(plan.screenshot || plan.screenshotUrl) && <button className="watchImage" type="button" onClick={() => plan.screenshotUrl ? window.open(plan.screenshotUrl, '_blank', 'noopener') : null}>{plan.screenshot ? <SetupPreview src={plan.screenshot} alt={`${plan.symbol} setup`} /> : <div><ExternalLink size={20}/> TradingView setup</div>}</button>}
+            <div className="planLevels"><span><small>ENTRY ZONE</small><b>{plan.entryFrom}{plan.entryTo !== plan.entryFrom ? ` – ${plan.entryTo}` : ''}</b></span><span><small>STOP</small><b className="red">{plan.sl}</b></span><span><small>TARGET</small><b className="green">{plan.tp}</b></span></div>
+            {plan.confirmation && <div className="planRule"><CheckCircle2 size={16}/><span><small>WAITING FOR</small>{plan.confirmation}</span></div>}
+            {plan.invalidation && <div className="planRule invalid"><Ban size={16}/><span><small>INVALID IF</small>{plan.invalidation}</span></div>}
+            <div className="planMeta"><span><Clock3 size={14}/>{formatDeadline(plan.expiresAt)}</span><span><ListChecks size={14}/>{checked}/{watchChecklistItems.length} confirmed</span><span>{plan.confidence}/10 confidence</span></div>
+            {WATCHLIST_ACTIVE_STATUSES.includes(plan.status) ? <div className="planActions">
+              {plan.status === 'Watching' && <button className="readyAction" onClick={() => updateStatus(plan, 'Ready')}><CheckCircle2 size={16}/> Mark Ready</button>}
+              <button className="executeAction" onClick={() => onExecute(plan)}><PlayCircle size={17}/> Execute Trade</button>
+              <button className="closeAction" onClick={() => updateStatus(plan, 'Skipped')} title="Skip"><Archive size={16}/></button>
+              <button className="closeAction danger" onClick={() => updateStatus(plan, 'Invalidated')} title="Invalidate"><Ban size={16}/></button>
+            </div> : <div className="historyActions"><span>{plan.status === 'Executed' ? 'Moved to Trading Journal' : `Closed as ${plan.status}`}</span><div>{plan.status !== 'Executed' && <button className="reopenPlan" onClick={() => updateStatus(plan, 'Watching')}><RotateCcw size={15}/> Reopen</button>}<button onClick={() => deletePlan(plan)}><Trash2 size={15}/> Delete</button></div></div>}
+          </article>;
+        })}</div>
+      </div>
+    </div>
+  </section>;
 }
 
 function EmotionTooltip({ active, payload }) {
@@ -766,7 +954,7 @@ function Coach({ trades, stats }) {
   return <section className="grid coach"><div className="card ai"><Sparkles/><h2>AI Trading Coach</h2><p>Your edge: {stats.winRate > 60 ? 'good execution and positive expectancy.' : 'needs more selectivity.'}</p></div><div className="card"><h3>Today’s Insight</h3><p>{bad.length ? `You had ${bad.length} emotionally risky trades. Reduce FOMO/greed entries and trade only confirmed setups.` : 'Great emotional control. Keep following your checklist.'}</p></div><div className="card"><h3>Things to Improve</h3><ul><li>Avoid trading after 2 losses.</li><li>Do not move SL too early.</li><li>Focus on London/NY high quality setups.</li></ul></div></section>
 }
 function Goals({ stats }) { return <div className="card goals"><h3>Prop Firm Ready</h3><div className="progress"><span style={{width:`${Math.min(stats.discipline,100)}%`}}/></div><p>Discipline: {stats.discipline}/100 · Target: minimum 80.</p></div> }
-function SettingsPage({ trades, setTrades }) {
+function SettingsPage({ trades, setTrades, watchPlans, setWatchPlans }) {
   const defaults = { accountSize: 10000, currency: 'USD', riskPerTrade: 1, maxDailyLoss: 3, maxTradesDay: 3, mainPair: 'XAUUSD', mainSession: 'London', journalMode: 'Strict', theme: 'Dark' };
   const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem('skrtzSettings') || 'null') || defaults);
 
@@ -781,7 +969,7 @@ function SettingsPage({ trades, setTrades }) {
   const dailyStop = ((Number(settings.accountSize || 0) * Number(settings.maxDailyLoss || 0)) / 100).toFixed(2);
 
   const exportJournal = () => {
-    const backup = { app: 'SKRTZ Trading Journal', exportedAt: new Date().toISOString(), settings, trades };
+    const backup = { app: 'SKRTZ Trading Journal', exportedAt: new Date().toISOString(), settings, trades, watchlist: watchPlans };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -802,11 +990,16 @@ function SettingsPage({ trades, setTrades }) {
         const parsed = JSON.parse(String(reader.result || '{}'));
         const importedTrades = Array.isArray(parsed) ? parsed : parsed.trades;
         if (!Array.isArray(importedTrades)) throw new Error('Invalid backup');
+        const importedWatchlist = Array.isArray(parsed.watchlist) ? parsed.watchlist : [];
         // Wait for screenshots to be committed to IndexedDB before showing the
-        // trades, otherwise a refresh right after import can lose the images.
-        try { await Promise.all(importedTrades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot))); }
+        // data, otherwise a refresh right after import can lose the images.
+        try {
+          await Promise.all(importedTrades.filter(t => t.screenshot).map(t => saveTradeScreenshot(t.id, t.screenshot)));
+          await Promise.all(importedWatchlist.filter(plan => plan.screenshot).map(plan => saveWatchScreenshot(plan.id, plan.screenshot)));
+        }
         catch (err) { console.warn('Some imported screenshots could not be stored.', err); }
         setTrades(importedTrades);
+        setWatchPlans(importedWatchlist);
         if (parsed.settings) setSettings(prev => ({ ...prev, ...parsed.settings }));
       } catch {
         alert('Backup file is not valid.');
@@ -852,6 +1045,7 @@ function SettingsPage({ trades, setTrades }) {
       <div className="toolsHead"><DatabaseZap size={20}/><div><h3>Journal Data</h3><p>Backup, import or reset your trades.</p></div></div>
       <div className="toolsStats">
         <span><b>{trades.length}</b><small>Trades saved</small></span>
+        <span><b>{watchPlans.length}</b><small>Watchlist plans</small></span>
         <span><b>{settings.currency} {riskValue}</b><small>Risk / trade</small></span>
       </div>
       <div className="settingsActions">

@@ -15,8 +15,12 @@ Dark-mode trading journal built with React + Vite.
 
 ## Features
 - Dashboard with PnL, win rate, profit factor, RR, drawdown and discipline score
+- Trade Plan Watchlist with entry zones, confirmation and invalidation rules, expiry and checklist
+- Watchlist lifecycle: Watching, Ready, Executed, Skipped, Invalidated and Expired
+- One-action Watchlist → Trading Journal prefill with plan-to-trade traceability
 - Add trades with symbol, direction, session, entry, SL, TP, risk, lot, emotion, setup and notes
-- Local browser storage persistence
+- Local browser storage persistence (trade/watchlist metadata in localStorage, screenshots in IndexedDB)
+- JSON backup/import includes settings, trades, watchlist plans and screenshots
 - Analytics by session, setup and emotion
 - Calendar heatmap
 - AI coach-style insights
