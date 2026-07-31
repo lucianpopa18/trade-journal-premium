@@ -7,6 +7,7 @@ import {
   prepareTradeFromPlan,
   summarizeWatchlist,
 } from '../src/watchlist.js';
+import { createEmptySetupChecklist } from '../src/setup-checklist.js';
 
 test('calculatePlannedRR uses the midpoint of an entry zone', () => {
   assert.equal(calculatePlannedRR({ entryFrom: 3335, entryTo: 3337, sl: 3328, tp: 3352 }), 2);
@@ -20,7 +21,17 @@ test('createWatchPlan normalizes a new plan with safe defaults', () => {
   assert.equal(plan.entryFrom, 1.09);
   assert.equal(plan.entryTo, 1.09);
   assert.equal(plan.rr, 2);
-  assert.deepEqual(plan.checklist, {});
+  assert.deepEqual(plan.setupChecklist, createEmptySetupChecklist());
+});
+
+test('createWatchPlan migrates the old seven-item checklist without claiming new A+ evidence', () => {
+  const plan = createWatchPlan({ entryFrom: 100, sl: 95, tp: 115, checklist: { trend: true, liquidity: true, rr: true } }, 'legacy-plan');
+  assert.deepEqual(plan.setupChecklist.legacy, {
+    confirmed: 3,
+    total: 7,
+    labels: ['Trend aligned', 'Liquidity taken', 'Minimum RR reached'],
+  });
+  assert.equal(plan.setupChecklist.mandatory.htfBias, false);
 });
 
 test('isPlanExpired only expires active plans after their deadline', () => {
@@ -31,14 +42,17 @@ test('isPlanExpired only expires active plans after their deadline', () => {
 });
 
 test('prepareTradeFromPlan prefills the journal and keeps plan traceability', () => {
+  const setupChecklist = createEmptySetupChecklist();
+  setupChecklist.mandatory.htfBias = true;
   const trade = prepareTradeFromPlan({
     id: 'plan-7', symbol: 'XAUUSD', direction: 'Long', session: 'London', setup: 'Breaker + FVG',
     entryFrom: 3335, entryTo: 3337, sl: 3328, tp: 3352, risk: 1, confidence: 8,
-    screenshot: 'data:image/jpeg;base64,abc', screenshotUrl: '', notes: 'Wait for displacement', rr: 2,
+    screenshot: 'data:image/jpeg;base64,abc', screenshotUrl: '', notes: 'Wait for displacement', rr: 2, setupChecklist,
   }, '2026-07-31');
   assert.equal(trade.symbol, 'XAUUSD');
   assert.equal(trade.entry, 3336);
   assert.equal(trade.sourcePlanId, 'plan-7');
+  assert.deepEqual(trade.setupChecklist, setupChecklist);
   assert.match(trade.notes, /Wait for displacement/);
   assert.match(trade.notes, /Planned entry zone: 3335–3337/);
 });

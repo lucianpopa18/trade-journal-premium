@@ -5,7 +5,7 @@ Dark-mode trading journal built with React + Vite.
 ## What is new in this version
 - iPhone-first responsive layout
 - Bottom mobile navigation with thumb-friendly buttons
-- Floating Add Trade button on mobile
+- Context-aware floating Add Trade shortcut on mobile
 - Sticky mobile header with blur/glass effect
 - iOS safe-area support for notch and home indicator
 - Input font sizing optimized to avoid iPhone zoom
@@ -16,6 +16,7 @@ Dark-mode trading journal built with React + Vite.
 ## Features
 - Dashboard with PnL, win rate, profit factor, RR, drawdown and discipline score
 - Trade Plan Watchlist with entry zones, confirmation and invalidation rules, expiry and checklist
+- Shared Setup A+ quality gate for every Trade and Watchlist plan: mandatory structure, optional confluences, objective written test and personal-state flags
 - Watchlist lifecycle: Watching, Ready, Executed, Skipped, Invalidated and Expired
 - One-action Watchlist → Trading Journal prefill with plan-to-trade traceability
 - Add trades with symbol, direction, session, entry, SL, TP, risk, lot, emotion, setup and notes

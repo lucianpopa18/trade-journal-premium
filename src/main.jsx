@@ -3,7 +3,16 @@ import { createRoot } from 'react-dom/client';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import { Plus, LayoutDashboard, BarChart3, CalendarDays, Brain, Target, Settings, NotebookTabs, Flame, ShieldCheck, Sparkles, Trash2, Eye, Pencil, Save, ArrowLeft, Menu, X, BadgeCheck, WalletCards, Percent, Moon, Download, Upload, RotateCcw, DatabaseZap, ImagePlus, Image as ImageIcon, Link2, ExternalLink, Radar, Clock3, CheckCircle2, Circle, Ban, PlayCircle, Archive, ListChecks } from 'lucide-react';
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, getDay, subDays, subMonths, addMonths, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
-import { createWatchPlan, isPlanExpired, prepareTradeFromPlan, summarizeWatchlist, WATCHLIST_ACTIVE_STATUSES } from './watchlist.js';
+import { calculatePlannedRR, createWatchPlan, isPlanExpired, normalizeWatchPlanChecklist, prepareTradeFromPlan, summarizeWatchlist, WATCHLIST_ACTIVE_STATUSES } from './watchlist.js';
+import { resetTradeFormAfterSave } from './trade-form.js';
+import {
+  A_PLUS_MANDATORY_ITEMS,
+  A_PLUS_CONFLUENCE_ITEMS,
+  A_PLUS_STATE_ITEMS,
+  createEmptySetupChecklist,
+  evaluateSetupChecklist,
+  normalizeSetupChecklist,
+} from './setup-checklist.js';
 import './styles.css';
 
 const starterTrades = [
@@ -99,6 +108,13 @@ function persistableTrades(trades) {
   return trades.map(({ screenshot, ...trade }) => trade);
 }
 
+const emptyTradeForm = () => ({
+  date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London',
+  entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG',
+  confidence: 8, notes: '', screenshot: '', screenshotUrl: '', sourcePlanId: '',
+  setupChecklist: createEmptySetupChecklist(),
+});
+
 function App() {
   const [active, setActive] = useState('Dashboard');
   const [trades, setTrades] = useState(() => JSON.parse(localStorage.getItem('skrtzTrades') || 'null') || starterTrades);
@@ -109,7 +125,7 @@ function App() {
     const savedTheme = savedSettings?.theme || 'Dark';
     document.documentElement.setAttribute('data-theme', savedTheme.toLowerCase());
   }, []);
-  const [form, setForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), symbol: 'XAUUSD', direction: 'Long', session: 'London', entry: '', sl: '', tp: '', risk: 1, lot: '', emotion: 'Calm', setup: 'Breaker + FVG', confidence: 8, notes: '', screenshot: '', screenshotUrl: '', sourcePlanId: '' });
+  const [form, setForm] = useState(emptyTradeForm);
 
   // Until screenshots are hydrated from IndexedDB we must NOT write trades back
   // to localStorage, otherwise we could persist a half-loaded state. This ref
@@ -143,11 +159,15 @@ function App() {
     (async () => {
       try {
         await Promise.all(watchPlans.filter(plan => plan.screenshot).map(plan => saveWatchScreenshot(plan.id, plan.screenshot)));
-        const loaded = await Promise.all(watchPlans.map(async plan => ({
-          ...plan,
-          status: isPlanExpired(plan) ? 'Expired' : plan.status,
-          screenshot: plan.screenshot || await getWatchScreenshot(plan.id),
-        })));
+        const loaded = await Promise.all(watchPlans.map(async plan => {
+          const { checklist: legacyChecklist, ...storedPlan } = plan;
+          return {
+            ...storedPlan,
+            setupChecklist: normalizeWatchPlanChecklist({ ...plan, checklist: legacyChecklist }),
+            status: isPlanExpired(plan) ? 'Expired' : plan.status,
+            screenshot: plan.screenshot || await getWatchScreenshot(plan.id),
+          };
+        }));
         if (mounted) setWatchPlans(loaded);
       } catch (error) { console.warn('Could not load watchlist screenshots.', error); }
       finally { if (mounted) watchHydrated.current = true; }
@@ -196,7 +216,9 @@ function App() {
   async function addTrade(e) {
     e.preventDefault();
     const { rr, pnl } = calculateTradeValues(form);
-    const newTrade = { ...form, id: makeId(), rr, pnl };
+    const checklistResult = evaluateSetupChecklist(form.setupChecklist, { rr });
+    if (!checklistResult.isAPlus && !window.confirm('This setup is not A+. Save it only to document and review the trade?')) return;
+    const newTrade = { ...form, setupChecklist: checklistResult.checklist, id: makeId(), rr, pnl };
     // Persist the screenshot BEFORE adding the trade to state. Awaiting the
     // IndexedDB write guarantees the image is committed, so a quick refresh
     // can't read an empty store and lose the picture.
@@ -213,7 +235,7 @@ function App() {
         ? { ...plan, status: 'Executed', executedAt: new Date().toISOString(), linkedTradeId: newTrade.id, updatedAt: new Date().toISOString() }
         : plan));
     }
-    setForm({ ...form, entry: '', sl: '', tp: '', lot: '', notes: '', screenshot: '', screenshotUrl: '', sourcePlanId: '' });
+    setForm(resetTradeFormAfterSave);
   }
 
   const watchSummary = useMemo(() => summarizeWatchlist(watchPlans), [watchPlans]);
@@ -251,7 +273,7 @@ function App() {
       {active === 'Goals' && <Goals stats={stats}/>}
       {active === 'Settings' && <SettingsPage trades={trades} setTrades={setTrades} watchPlans={watchPlans} setWatchPlans={setWatchPlans}/>}
     </main>
-    {active !== 'Watchlist' && <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>}
+    {!['Trades', 'Watchlist'].includes(active) && <button className="fab" onClick={() => go('Trades')} aria-label="Add trade"><Plus size={24}/></button>}
     <nav className="bottomNav" aria-label="Mobile navigation">{nav.slice(0,5).map(([name, Icon]) => <button key={name} className={active===name?'active':''} onClick={()=>go(name)}><Icon size={19}/><span>{name === 'Dashboard' ? 'Home' : name.replace('AI Coach','Coach')}</span></button>)}</nav>
   </div>
 }
@@ -489,6 +511,76 @@ function DetailItem({ label, value, tone }) {
   return <div className="detailItem"><span>{label}</span><b className={tone || ''}>{value || '-'}</b></div>
 }
 
+function SetupVerdict({ result, compact = false }) {
+  const verdictClass = result.isAPlus ? 'ready' : (!result.assessed ? 'unassessed' : 'incomplete');
+  return <div className={`aPlusVerdict ${verdictClass} ${compact ? 'compact' : ''}`}>
+    <span>{result.verdict}</span>
+    <small>{result.hasLegacy && !result.assessed
+      ? `${result.checklist.legacy.confirmed}/${result.checklist.legacy.total} old checks preserved`
+      : `${result.mandatoryPassed}/${result.mandatoryTotal} mandatory · ${result.confluenceCount}/${result.confluenceTotal} confluences`}</small>
+    {result.stateWarnings > 0 && <b>{result.stateWarnings} state flag{result.stateWarnings === 1 ? '' : 's'}</b>}
+  </div>;
+}
+
+function SetupChecklistEditor({ value, onChange, rr }) {
+  const checklist = normalizeSetupChecklist(value);
+  const result = evaluateSetupChecklist(checklist, { rr });
+  const toggle = (group, key) => onChange({
+    ...checklist,
+    [group]: { ...checklist[group], [key]: !checklist[group][key] },
+  });
+  const setReason = (index, text) => onChange({
+    ...checklist,
+    reasons: checklist.reasons.map((reason, itemIndex) => itemIndex === index ? text : reason),
+  });
+
+  return <section className="setupAPlus wide">
+    <div className="setupAPlusHead">
+      <div><span>SETUP QUALITY GATE</span><h4>Checklist Setup A+</h4></div>
+      <SetupVerdict result={result} compact />
+    </div>
+    <p className="aPlusRule">If every mandatory point is not a verifiable fact on the chart, it is not A+. Do not enter.</p>
+    {checklist.legacy && <div className="legacyChecklistNotice"><b>Previous checklist preserved · {checklist.legacy.confirmed}/{checklist.legacy.total}</b><span>Historical only — review against the new A+ rules.</span>{checklist.legacy.labels.length > 0 && <small>{checklist.legacy.labels.join(' · ')}</small>}</div>}
+
+    <div className="aPlusGroup mandatoryGroup">
+      <div className="aPlusGroupHead"><div><b>1. Mandatory</b><small>All must be YES</small></div><strong>{result.mandatoryPassed}/{result.mandatoryTotal}</strong></div>
+      <div className="aPlusChecks">{A_PLUS_MANDATORY_ITEMS.map(([key, label], index) => {
+        const checked = checklist.mandatory[key] && (key !== 'structuralRr' || result.rrPassed);
+        return <button type="button" key={key} className={checked ? 'checked' : ''} onClick={() => toggle('mandatory', key)}>
+          {checked ? <CheckCircle2 size={18}/> : <Circle size={18}/>}<span>{label}{index === A_PLUS_MANDATORY_ITEMS.length - 1 && <small className={result.rrPassed ? 'rrOk' : 'rrLow'}>Actual RR: {Number(rr || 0).toFixed(2)}R</small>}</span>
+        </button>;
+      })}</div>
+    </div>
+
+    <div className="aPlusGroup">
+      <div className="aPlusGroupHead"><div><b>2. Confluence</b><small>Optional evidence — more is stronger</small></div><strong>{result.confluenceCount}/{result.confluenceTotal}</strong></div>
+      <div className="aPlusChecks twoCol">{A_PLUS_CONFLUENCE_ITEMS.map(([key, label]) => <button type="button" key={key} className={checklist.confluence[key] ? 'checked' : ''} onClick={() => toggle('confluence', key)}>{checklist.confluence[key] ? <CheckCircle2 size={18}/> : <Circle size={18}/>}<span>{label}</span></button>)}</div>
+    </div>
+
+    <div className="aPlusGroup writtenTest">
+      <div className="aPlusGroupHead"><div><b>3. Written test</b><small>2–3 objective facts before entry</small></div><strong>{result.filledReasonCount}/2 min</strong></div>
+      <div className="reasonGrid">{checklist.reasons.map((reason, index) => <label key={index}>Objective fact #{index + 1}{index === 2 && <small> optional</small>}<textarea value={reason} placeholder="What is visibly verifiable on the chart?" onChange={event => setReason(index, event.target.value)}/></label>)}</div>
+      {result.subjectiveTerms.length > 0 && <div className="writingWarning"><Ban size={16}/> Remove subjective wording: {result.subjectiveTerms.join(', ')}.</div>}
+    </div>
+
+    <div className="aPlusGroup stateCheck">
+      <div className="aPlusGroupHead"><div><b>4. Personal state check</b><small>Attention flags — never an automatic blocker</small></div>{result.assessed && <strong>{result.stateWarnings ? `${result.stateWarnings} flags` : 'CLEAR'}</strong>}</div>
+      <div className="aPlusChecks">{A_PLUS_STATE_ITEMS.map(([key, label]) => <button type="button" key={key} className={checklist.state[key] ? 'checked' : 'stateUnchecked'} onClick={() => toggle('state', key)}>{checklist.state[key] ? <CheckCircle2 size={18}/> : <Circle size={18}/>}<span>{label}</span></button>)}</div>
+    </div>
+  </section>;
+}
+
+function SetupChecklistReview({ checklist, rr }) {
+  const result = evaluateSetupChecklist(checklist, { rr });
+  if (!result.assessed) return <div className="checklistReview"><SetupVerdict result={result}/>{result.hasLegacy
+    ? <><p>Legacy pre-trade checklist preserved: {result.checklist.legacy.confirmed}/{result.checklist.legacy.total} confirmed.</p>{result.checklist.legacy.labels.length > 0 && <ul>{result.checklist.legacy.labels.map(label => <li key={label}>{label}</li>)}</ul>}</>
+    : <p>This historical trade has no Setup A+ assessment.</p>}</div>;
+  return <div className="checklistReview">
+    <SetupVerdict result={result}/>
+    {result.checklist.reasons.filter(Boolean).length > 0 && <ol>{result.checklist.reasons.filter(Boolean).map((reason, index) => <li key={index}>{reason}</li>)}</ol>}
+  </div>;
+}
+
 function TradeDetailsModal({ trade, onClose, onEdit, onViewSetup }) {
   useEffect(() => {
     if (trade) requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
@@ -524,6 +616,7 @@ function TradeDetailsModal({ trade, onClose, onEdit, onViewSetup }) {
         <DetailItem label="Emotion" value={trade.emotion} />
         <DetailItem label="Confidence" value={`${trade.confidence || 0}/10`} />
       </div>
+      <SetupChecklistReview checklist={trade.setupChecklist} rr={trade.rr}/>
       <div className="tradeNotes">
         <span>Notes</span>
         <p>{trade.notes || 'No notes added for this trade.'}</p>
@@ -593,6 +686,7 @@ function EditTradeModal({ trade, setTrade, onSave, onClose }) {
         <label>Setup<select value={trade.setup} onChange={e=>setTrade({...trade,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
         {fields.map(([k,l])=><label key={k}>{l}<input value={trade[k] ?? ''} onChange={e=>setTrade({...trade,[k]:e.target.value})}/></label>)}
         <label>Confidence<input type="range" min="1" max="10" value={trade.confidence || 5} onChange={e=>setTrade({...trade,confidence:e.target.value})}/></label>
+        <SetupChecklistEditor value={trade.setupChecklist} rr={calculateTradeValues(trade).rr} onChange={setupChecklist => setTrade(current => ({ ...current, setupChecklist }))}/>
         <ScreenshotPicker value={trade.screenshot || ''} urlValue={trade.screenshotUrl || ''} onChange={value=>setTrade(t=>({...t,screenshot:value}))} onUrlChange={value=>setTrade(t=>({...t,screenshotUrl:value}))} />
         <label className="wide">Notes<textarea value={trade.notes || ''} onChange={e=>setTrade({...trade,notes:e.target.value})}/></label>
       </div>
@@ -605,7 +699,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   const [setupTrade, setSetupTrade] = useState(null);
   const [editTrade, setEditTrade] = useState(null);
   const fields = [['symbol','Symbol'], ['entry','Entry'], ['sl','SL'], ['tp','TP'], ['risk','Risk %'], ['lot','Lot Size'], ['pnl','PnL override']];
-  const startEdit = (trade) => { setDetailTrade(null); setSetupTrade(null); setEditTrade({ ...trade }); };
+  const startEdit = (trade) => { setDetailTrade(null); setSetupTrade(null); setEditTrade({ ...trade, setupChecklist: normalizeSetupChecklist(trade.setupChecklist) }); };
   const replaceSetup = async (trade, screenshot) => {
     const updated = { ...trade, screenshot, screenshotUrl: '' };
     try { await saveTradeScreenshot(updated.id, screenshot); }
@@ -625,7 +719,9 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   const saveEdit = async (e) => {
     e.preventDefault();
     const values = calculateTradeValues(editTrade);
-    const updated = { ...editTrade, ...values };
+    const checklistResult = evaluateSetupChecklist(editTrade.setupChecklist, { rr: values.rr });
+    if (!checklistResult.isAPlus && !window.confirm('This setup is not A+. Save these changes only for an honest review record?')) return;
+    const updated = { ...editTrade, setupChecklist: checklistResult.checklist, ...values };
     // Await the IndexedDB write so the image is committed before we close the
     // modal / re-render, otherwise a quick refresh could miss it.
     try {
@@ -646,6 +742,7 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
       <label>Setup<select value={form.setup} onChange={e=>setForm({...form,setup:e.target.value})}><option>Breaker + FVG</option><option>Liquidity Sweep</option><option>Break of Structure</option><option>Trend Continuation</option><option>Reversal</option></select></label>
       {fields.map(([k,l])=><label key={k}>{l}<input value={form[k] || ''} onChange={e=>setForm({...form,[k]:e.target.value})}/></label>)}
       <label>Confidence<input type="range" min="1" max="10" value={form.confidence} onChange={e=>setForm({...form,confidence:e.target.value})}/></label>
+      <SetupChecklistEditor value={form.setupChecklist} rr={calculateTradeValues(form).rr} onChange={setupChecklist => setForm(current => ({ ...current, setupChecklist }))}/>
       <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value=>setForm(f=>({...f,screenshot:value}))} onUrlChange={value=>setForm(f=>({...f,screenshotUrl:value}))} />
       <label className="wide">Notes<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div>
       <button className="primary full">Save Trade</button>
@@ -667,20 +764,10 @@ function Trades({ trades, form, setForm, addTrade, setTrades }) {
   </section>
 }
 
-const watchChecklistItems = [
-  ['trend', 'Trend aligned'],
-  ['liquidity', 'Liquidity taken'],
-  ['confirmation', 'Entry confirmation'],
-  ['news', 'No high-impact news'],
-  ['risk', 'Risk within limit'],
-  ['session', 'Session valid'],
-  ['rr', 'Minimum RR reached'],
-];
-
 const emptyWatchForm = () => ({
   symbol: 'XAUUSD', direction: 'Long', timeframe: 'M15', session: 'London', setup: 'Breaker + FVG',
   entryFrom: '', entryTo: '', sl: '', tp: '', risk: 1, confidence: 7, confirmation: '', invalidation: '',
-  expiresAt: '', screenshot: '', screenshotUrl: '', notes: '', checklist: {}, status: 'Watching',
+  expiresAt: '', screenshot: '', screenshotUrl: '', notes: '', setupChecklist: createEmptySetupChecklist(), status: 'Watching',
 });
 
 function WatchlistPage({ plans, setPlans, onExecute }) {
@@ -706,7 +793,7 @@ function WatchlistPage({ plans, setPlans, onExecute }) {
     setView(WATCHLIST_ACTIVE_STATUSES.includes(plan.status) ? 'Active' : 'History');
   };
   const editPlan = plan => {
-    setForm({ ...emptyWatchForm(), ...plan, checklist: { ...(plan.checklist || {}) } });
+    setForm({ ...emptyWatchForm(), ...plan, setupChecklist: normalizeWatchPlanChecklist(plan) });
     setEditingId(plan.id);
     requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
@@ -714,11 +801,20 @@ function WatchlistPage({ plans, setPlans, onExecute }) {
     setPlans(current => current.map(item => item.id === plan.id ? { ...item, status, updatedAt: new Date().toISOString() } : item));
   };
   const deletePlan = plan => {
-    if (!confirm(`Delete ${plan.symbol} from the watchlist?`)) return;
+    if (!window.confirm(`Delete ${plan.symbol} from the watchlist?`)) return;
     removeWatchScreenshot(plan.id).catch(() => {});
     setPlans(current => current.filter(item => item.id !== plan.id));
   };
-  const toggleCheck = key => setForm(current => ({ ...current, checklist: { ...current.checklist, [key]: !current.checklist?.[key] } }));
+  const markReady = plan => {
+    const result = evaluateSetupChecklist(normalizeWatchPlanChecklist(plan), { rr: calculatePlannedRR(plan) });
+    if (!result.isAPlus) return window.alert('This plan is not A+ yet. Complete every mandatory item and the objective written test first.');
+    updateStatus(plan, 'Ready');
+  };
+  const executePlan = plan => {
+    const result = evaluateSetupChecklist(normalizeWatchPlanChecklist(plan), { rr: calculatePlannedRR(plan) });
+    if (!result.isAPlus && !window.confirm('This setup is not A+. Continue only to document or review a non-A+ trade?')) return;
+    onExecute(plan);
+  };
   const formatDeadline = value => {
     if (!value) return 'No expiry';
     const date = new Date(value);
@@ -752,7 +848,7 @@ function WatchlistPage({ plans, setPlans, onExecute }) {
           <ScreenshotPicker value={form.screenshot || ''} urlValue={form.screenshotUrl || ''} onChange={value => setForm(current => ({ ...current, screenshot: value }))} onUrlChange={value => setForm(current => ({ ...current, screenshotUrl: value }))} label="Chart setup" />
           <label className="wide">Plan notes<textarea placeholder="Context, levels, news, what you are waiting for…" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}/></label>
         </div>
-        <div className="planChecklist"><div><ListChecks size={18}/><span>Pre-trade checklist</span><b>{Object.values(form.checklist || {}).filter(Boolean).length}/{watchChecklistItems.length}</b></div><div className="checkGrid">{watchChecklistItems.map(([key, label]) => <button type="button" key={key} className={form.checklist?.[key] ? 'checked' : ''} onClick={() => toggleCheck(key)}>{form.checklist?.[key] ? <CheckCircle2 size={17}/> : <Circle size={17}/>} {label}</button>)}</div></div>
+        <SetupChecklistEditor value={form.setupChecklist} rr={createWatchPlan(form, 'preview').rr} onChange={setupChecklist => setForm(current => ({ ...current, setupChecklist }))}/>
         <div className="watchFormFooter"><div><span>Estimated RR</span><strong>{createWatchPlan(form, 'preview').rr.toFixed(2)}R</strong></div><button className="primary" type="submit"><Save size={17}/>{editingId ? 'Update Plan' : 'Save to Watchlist'}</button></div>
       </form>
 
@@ -760,18 +856,20 @@ function WatchlistPage({ plans, setPlans, onExecute }) {
         <div className="watchTabs"><button className={view === 'Active' ? 'active' : ''} onClick={() => setView('Active')}>Active Plans <b>{summary.active}</b></button><button className={view === 'History' ? 'active' : ''} onClick={() => setView('History')}>History <b>{summary.closed}</b></button></div>
         {!visiblePlans.length && <div className="card emptyWatch"><Radar size={34}/><h3>{view === 'Active' ? 'No active plans yet' : 'No closed plans yet'}</h3><p>{view === 'Active' ? 'Build your first opportunity on the left.' : 'Executed, skipped and invalidated plans will live here.'}</p></div>}
         <div className="watchCards">{visiblePlans.map(plan => {
-          const checked = Object.values(plan.checklist || {}).filter(Boolean).length;
+          const liveRr = calculatePlannedRR(plan);
+          const checklistResult = evaluateSetupChecklist(normalizeWatchPlanChecklist(plan), { rr: liveRr });
           return <article className={`card watchPlan status${plan.status}`} key={plan.id}>
             <div className="planTop"><div className={`directionBadge ${plan.direction.toLowerCase()}`}>{plan.direction}</div><span className="planStatus">{plan.status}</span><button className="planMore" onClick={() => editPlan(plan)} aria-label="Edit plan"><Pencil size={16}/></button></div>
-            <div className="planIdentity"><div><h3>{plan.symbol}</h3><p>{plan.timeframe} · {plan.session} · {plan.setup}</p></div><strong>{Number(plan.rr || 0).toFixed(2)}R</strong></div>
+            <div className="planIdentity"><div><h3>{plan.symbol}</h3><p>{plan.timeframe} · {plan.session} · {plan.setup}</p></div><strong>{liveRr.toFixed(2)}R</strong></div>
             {(plan.screenshot || plan.screenshotUrl) && <button className="watchImage" type="button" onClick={() => plan.screenshotUrl ? window.open(plan.screenshotUrl, '_blank', 'noopener') : null}>{plan.screenshot ? <SetupPreview src={plan.screenshot} alt={`${plan.symbol} setup`} /> : <div><ExternalLink size={20}/> TradingView setup</div>}</button>}
             <div className="planLevels"><span><small>ENTRY ZONE</small><b>{plan.entryFrom}{plan.entryTo !== plan.entryFrom ? ` – ${plan.entryTo}` : ''}</b></span><span><small>STOP</small><b className="red">{plan.sl}</b></span><span><small>TARGET</small><b className="green">{plan.tp}</b></span></div>
             {plan.confirmation && <div className="planRule"><CheckCircle2 size={16}/><span><small>WAITING FOR</small>{plan.confirmation}</span></div>}
             {plan.invalidation && <div className="planRule invalid"><Ban size={16}/><span><small>INVALID IF</small>{plan.invalidation}</span></div>}
-            <div className="planMeta"><span><Clock3 size={14}/>{formatDeadline(plan.expiresAt)}</span><span><ListChecks size={14}/>{checked}/{watchChecklistItems.length} confirmed</span><span>{plan.confidence}/10 confidence</span></div>
+            <SetupVerdict result={checklistResult} compact/>
+            <div className="planMeta"><span><Clock3 size={14}/>{formatDeadline(plan.expiresAt)}</span><span><ListChecks size={14}/>{checklistResult.mandatoryPassed}/{checklistResult.mandatoryTotal} mandatory</span><span>{plan.confidence}/10 confidence</span></div>
             {WATCHLIST_ACTIVE_STATUSES.includes(plan.status) ? <div className="planActions">
-              {plan.status === 'Watching' && <button className="readyAction" onClick={() => updateStatus(plan, 'Ready')}><CheckCircle2 size={16}/> Mark Ready</button>}
-              <button className="executeAction" onClick={() => onExecute(plan)}><PlayCircle size={17}/> Execute Trade</button>
+              {plan.status === 'Watching' && <button className="readyAction" onClick={() => markReady(plan)}><CheckCircle2 size={16}/> Mark Ready</button>}
+              <button className="executeAction" onClick={() => executePlan(plan)}><PlayCircle size={17}/> Execute Trade</button>
               <button className="closeAction" onClick={() => updateStatus(plan, 'Skipped')} title="Skip"><Archive size={16}/></button>
               <button className="closeAction danger" onClick={() => updateStatus(plan, 'Invalidated')} title="Invalidate"><Ban size={16}/></button>
             </div> : <div className="historyActions"><span>{plan.status === 'Executed' ? 'Moved to Trading Journal' : `Closed as ${plan.status}`}</span><div>{plan.status !== 'Executed' && <button className="reopenPlan" onClick={() => updateStatus(plan, 'Watching')}><RotateCcw size={15}/> Reopen</button>}<button onClick={() => deletePlan(plan)}><Trash2 size={15}/> Delete</button></div></div>}
