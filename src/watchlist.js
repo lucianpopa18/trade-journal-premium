@@ -1,7 +1,15 @@
+import { migrateLegacySetupChecklist, normalizeSetupChecklist } from './setup-checklist.js';
+
 export const WATCHLIST_ACTIVE_STATUSES = ['Watching', 'Ready'];
 export const WATCHLIST_CLOSED_STATUSES = ['Executed', 'Skipped', 'Invalidated', 'Expired'];
 
 const numberOrBlank = value => value === '' || value === null || value === undefined ? '' : Number(value);
+
+export function normalizeWatchPlanChecklist(plan) {
+  if (plan?.setupChecklist) return normalizeSetupChecklist(plan.setupChecklist);
+  if (plan?.checklist && typeof plan.checklist === 'object') return migrateLegacySetupChecklist(plan.checklist);
+  return normalizeSetupChecklist(undefined);
+}
 
 export function calculatePlannedRR({ entryFrom, entryTo, sl, tp }) {
   const from = Number(entryFrom);
@@ -41,7 +49,7 @@ export function createWatchPlan(input, id, createdAt = new Date().toISOString())
     screenshot: input.screenshot || '',
     screenshotUrl: input.screenshotUrl || '',
     notes: String(input.notes || '').trim(),
-    checklist: input.checklist && typeof input.checklist === 'object' ? { ...input.checklist } : {},
+    setupChecklist: normalizeWatchPlanChecklist(input),
   };
   return { ...plan, rr: calculatePlannedRR(plan) };
 }
@@ -74,6 +82,7 @@ export function prepareTradeFromPlan(plan, date) {
     notes: [plan.notes, trace].filter(Boolean).join('\n\n'),
     screenshot: plan.screenshot || '',
     screenshotUrl: plan.screenshotUrl || '',
+    setupChecklist: normalizeWatchPlanChecklist(plan),
     sourcePlanId: plan.id,
   };
 }
